@@ -9,6 +9,8 @@ const schema = z.object({
   FACEBOOK_ACCESS_TOKEN: z.string().optional().default(""),
   LISTEN_INTERVAL_MINUTES: z.coerce.number().int().min(5).max(24 * 60).default(15),
   SEARCH_MAX_RESULTS: z.coerce.number().int().min(10).max(100).default(20),
+  ALERT_WEBHOOK_URL: z.string().optional().default(""),
+  DESKTOP_NOTIFY: z.enum(["0", "1"]).optional().default("1"),
 });
 
 export type AppConfig = z.infer<typeof schema>;

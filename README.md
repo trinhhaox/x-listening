@@ -43,7 +43,7 @@ Sắc thái “nghiêng tốt / nghiêng xấu” là đếm từ vựng tiếng
 
 Trên mỗi bài có thể **ghim**, **giấu**, hoặc viết ghi chú nội bộ. Dây tin có ba ngăn: đang xem, đã ghim, đã giấu. Bài đã giấu không tính vào số liệu.
 
-**Chuông** kêu khi bài mới (và bài đang lưu lúc đặt chuông) nghiêng xấu, chứa một cụm từ, hoặc đủ số lượt thích. Chuông có thể áp cho một tần số hoặc mọi tần số. Bấm **Đã xem** để tắt một hồi chuông.
+**Chuông** kêu khi bài mới (và bài đang lưu lúc đặt chuông) nghiêng xấu, chứa một cụm từ, hoặc đủ số lượt thích. Chuông có thể áp cho một tần số hoặc mọi tần số. Bấm **Đã xem** để tắt một hồi chuông. Hồi chuông mới còn hiện thông báo trên máy Mac. Đặt `DESKTOP_NOTIFY=0` để tắt. `ALERT_WEBHOOK_URL` nhận địa chỉ https, hoặc http trên máy này, và được gọi bằng JSON khi có hồi mới.
 
 ## Kiểm tra
 

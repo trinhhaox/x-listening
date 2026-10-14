@@ -27,6 +27,8 @@ type DashboardModel = {
   queueNew: number;
   spike: string | null;
   lexicon: { word: string; polarity: string }[];
+  outbound: string;
+  notifyError: string;
 };
 
 export function loginPage(error = ""): string {
@@ -207,6 +209,8 @@ export function dashboardPage(model: DashboardModel): string {
         </form>
         <ul class="topics">${topicList || `<li class="off"><div><strong>Chưa có tần số</strong><span>Thêm một câu tìm kiếm để bắt đầu nghe.</span></div></li>`}</ul>
         <h2>Chuông</h2>
+        ${model.outbound ? `<p class="hint">Hồi chuông mới còn ra ${escapeHtml(model.outbound)}.</p>` : ""}
+        ${model.notifyError ? `<p class="error">${escapeHtml(model.notifyError)}</p>` : ""}
         <form class="add" method="post" action="/alerts">
           <label>Tên<input name="name" required maxlength="80" placeholder="Bài kêu ca" /></label>
           <label>Khi nào<select name="kind">
@@ -434,6 +438,7 @@ function layout(title: string, body: string): string {
     label { display: block; margin-bottom: 12px; color: var(--muted); font-size: 0.92rem; }
     label.check { display: flex; gap: 8px; align-items: center; }
     label.check input { width: auto; }
+    .hint { color: var(--muted); font-size: 0.92rem; }
     .notice, .error { background: #fff4ea; border-left: 3px solid var(--copper); padding: 10px 12px; }
     .error { color: var(--clay); }
     .meters { align-items: stretch; margin: 18px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 14px 0; }

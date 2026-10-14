@@ -7,6 +7,7 @@ import { issueSession, sessionValid } from "../src/auth.js";
 import type { AppConfig } from "../src/config.js";
 import { Store } from "../src/db.js";
 import { pageKey } from "../src/facebook.js";
+import { deliverHit, webhookTarget } from "../src/notify.js";
 import { listenOnce, PAGE_CAP } from "../src/listen.js";
 import { buildSearchQuery } from "../src/query.js";
 import { classifySentiment } from "../src/sentiment.js";
@@ -21,6 +22,8 @@ function testConfig(): AppConfig {
     FACEBOOK_ACCESS_TOKEN: "",
     LISTEN_INTERVAL_MINUTES: 15,
     SEARCH_MAX_RESULTS: 10,
+    ALERT_WEBHOOK_URL: "",
+    DESKTOP_NOTIFY: "0",
   };
 }
 
@@ -380,6 +383,65 @@ test("từ của người vận hành chấm lại bài đã lưu", () => {
   assert.equal(store.listMentions()[0]?.sentiment, "positive");
   store.deleteLexiconWord("ngon");
   assert.equal(store.listMentions()[0]?.sentiment, "neutral");
+  store.close();
+});
+
+test("chuông ra ngoài chỉ gửi webhook hợp lệ một lần", async () => {
+  assert.equal(webhookTarget("https://example.com/hook"), "https://example.com/hook");
+  assert.equal(webhookTarget("http://127.0.0.1:9/hook"), "http://127.0.0.1:9/hook");
+  assert.equal(webhookTarget("http://example.com/hook"), null);
+  const store = Store.open(":memory:");
+  store.insertTopic({
+    id: "t1",
+    name: "Quán",
+    query: "cà phê",
+    excludeReposts: true,
+    createdAt: "2026-10-14T00:00:00.000Z",
+  });
+  store.insertMention(
+    {
+      id: "1",
+      topicId: "t1",
+      text: "Thất vọng",
+      authorUsername: "lan",
+      authorName: "Lan",
+      createdAt: "2026-10-14T01:00:00.000Z",
+      lang: "vi",
+      likeCount: 1,
+      repostCount: 0,
+      replyCount: 0,
+      quoteCount: 0,
+    },
+    "2026-10-14T01:00:00.000Z",
+  );
+  store.insertAlert({
+    id: "a1",
+    topicId: null,
+    name: "Kêu ca",
+    kind: "negative",
+    phrase: "",
+    minLikes: 0,
+    createdAt: "2026-10-14T02:00:00.000Z",
+  });
+  const pending = store.listPendingNotices();
+  assert.equal(pending.length, 1);
+  let calls = 0;
+  const error = await deliverHit(pending[0]!, {
+    webhookUrl: "https://example.com/hook",
+    desktop: true,
+    desktopImpl: () => {},
+    fetchImpl: async (_input, init) => {
+      calls += 1;
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.alert, "Kêu ca");
+      assert.equal(init?.method, "POST");
+      return new Response("ok", { status: 200 });
+    },
+  });
+  assert.equal(error, null);
+  assert.equal(calls, 1);
+  store.markNotified(pending.map((hit) => hit.id));
+  assert.equal(store.listPendingNotices().length, 0);
   store.close();
 });
 

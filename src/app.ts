@@ -6,6 +6,7 @@ import type { AppConfig } from "./config.js";
 import { muteKey, Store, type MentionView, type QueueState } from "./db.js";
 import { pageKey } from "./facebook.js";
 import { listenOnce, type ListenReport } from "./listen.js";
+import { deliverHit } from "./notify.js";
 import { buildSearchQuery } from "./query.js";
 import { lexiconWord } from "./sentiment.js";
 import { buckets, briefMarkdown, buildBrief, dayStartIso, daysEnding, localDay, spikeReason } from "./digest.js";
@@ -17,20 +18,44 @@ const attempts = new Map<string, { count: number; resetAt: number }>();
 export function createApp(config: AppConfig, store: Store) {
   const app = new Hono();
   let listening = false;
+  let notifyError = "";
 
   async function runListen(extra?: { onlyTopicId?: string; startTime?: string }): Promise<ListenReport> {
     if (listening) return { saved: 0, topics: 0, errors: ["Đang nghe một lượt khác."] };
     listening = true;
     try {
-      return await listenOnce(store, {
+      const report = await listenOnce(store, {
         token: config.X_BEARER_TOKEN,
         facebookToken: config.FACEBOOK_ACCESS_TOKEN,
         maxResults: config.SEARCH_MAX_RESULTS,
         onlyTopicId: extra?.onlyTopicId,
         startTime: extra?.startTime,
       });
+      await fanOutHits();
+      return report;
     } finally {
       listening = false;
+    }
+  }
+
+  async function fanOutHits(): Promise<void> {
+    const hits = store.listPendingNotices();
+    const done: string[] = [];
+    for (const hit of hits) {
+      try {
+        const error = await deliverHit(hit, {
+          webhookUrl: config.ALERT_WEBHOOK_URL,
+          desktop: config.DESKTOP_NOTIFY === "1",
+        });
+        if (error) notifyError = error;
+        else done.push(hit.id);
+      } catch (error) {
+        notifyError = error instanceof Error ? error.message : "Không gửi được chuông ra ngoài.";
+      }
+    }
+    if (done.length > 0) {
+      store.markNotified(done);
+      if (done.length === hits.length) notifyError = "";
     }
   }
 
@@ -104,6 +129,8 @@ export function createApp(config: AppConfig, store: Store) {
         muted: store.listMuted(),
         queueNew: store.countNew(),
         lexicon: store.listLexicon(),
+        outbound: outboundLabel(config),
+        notifyError,
         spike: spikeReason(series, today),
       }),
     );
@@ -263,6 +290,7 @@ export function createApp(config: AppConfig, store: Store) {
       minLikes: kind === "likes" ? minLikes : 0,
       createdAt: new Date().toISOString(),
     });
+    await fanOutHits();
     return c.redirect(deskPath("", "wire", `Đã đặt chuông “${name}”, khớp ${found} bài đang có.`));
   });
 
@@ -333,6 +361,12 @@ export function createApp(config: AppConfig, store: Store) {
   }
 
   return { app, runListen };
+}
+
+function outboundLabel(config: AppConfig): string {
+  const desktop = config.DESKTOP_NOTIFY === "1" ? "thông báo trên máy" : "";
+  const webhook = config.ALERT_WEBHOOK_URL.trim() ? "webhook" : "";
+  return [desktop, webhook].filter(Boolean).join(" và ");
 }
 
 function todayBrief(store: Store) {

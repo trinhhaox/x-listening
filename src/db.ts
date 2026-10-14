@@ -6,6 +6,7 @@ import { alertReason, type AlertKind, type AlertRule } from "./alerts.js";
 import type { DigestPost } from "./digest.js";
 
 export type { AlertRule };
+import type { HitNotice } from "./notify.js";
 import { classifySentiment, type Sentiment } from "./sentiment.js";
 
 export type Topic = {
@@ -171,6 +172,7 @@ export class Store {
     ensureColumn(db, "mentions", "url", "url TEXT NOT NULL DEFAULT ''");
     ensureColumn(db, "topics", "source", "source TEXT NOT NULL DEFAULT 'x'");
     ensureColumn(db, "topics", "phrase", "phrase TEXT NOT NULL DEFAULT ''");
+    ensureColumn(db, "alert_hits", "notified", "notified INTEGER NOT NULL DEFAULT 1");
     return new Store(db);
   }
 
@@ -472,6 +474,34 @@ export class Store {
       .all(limit) as AlertHitRow[];
   }
 
+  listPendingNotices(limit = 10): HitNotice[] {
+    const rows = this.db
+      .prepare(
+        `SELECT h.id, a.name AS alert_name, h.reason, m.author_name, t.name AS topic_name, m.text
+         FROM alert_hits h
+         JOIN alerts a ON a.id = h.alert_id
+         JOIN mentions m ON m.id = h.mention_id AND m.topic_id = h.topic_id
+         JOIN topics t ON t.id = h.topic_id
+         WHERE h.seen = 0 AND h.notified = 0 AND ${HEARD_M}
+         ORDER BY h.created_at ASC
+         LIMIT ?`,
+      )
+      .all(limit) as Array<{ id: string; alert_name: string; reason: string; author_name: string; topic_name: string; text: string }>;
+    return rows.map((row) => ({
+      id: row.id,
+      alertName: row.alert_name,
+      reason: row.reason,
+      authorName: row.author_name,
+      topicName: row.topic_name,
+      text: row.text,
+    }));
+  }
+
+  markNotified(ids: string[]): void {
+    const update = this.db.prepare("UPDATE alert_hits SET notified = 1 WHERE id = ?");
+    for (const id of ids) update.run(id);
+  }
+
   seeHit(id: string): void {
     this.db.prepare("UPDATE alert_hits SET seen = 1 WHERE id = ?").run(id);
   }
@@ -642,8 +672,8 @@ export class Store {
   private insertHit(alertId: string, mentionId: string, topicId: string, reason: string, at: string): boolean {
     const result = this.db
       .prepare(
-        `INSERT INTO alert_hits (id, alert_id, mention_id, topic_id, reason, created_at, seen)
-         VALUES (?, ?, ?, ?, ?, ?, 0)
+        `INSERT INTO alert_hits (id, alert_id, mention_id, topic_id, reason, created_at, seen, notified)
+         VALUES (?, ?, ?, ?, ?, ?, 0, 0)
          ON CONFLICT(alert_id, mention_id, topic_id) DO NOTHING`,
       )
       .run(randomUUID(), alertId, mentionId, topicId, reason, at);
