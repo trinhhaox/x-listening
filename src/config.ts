@@ -6,6 +6,7 @@ const schema = z.object({
   DATABASE_PATH: z.string().min(1).default("./data/listening.db"),
   ADMIN_PASSWORD: z.string().min(8, "ADMIN_PASSWORD cần ít nhất 8 ký tự"),
   X_BEARER_TOKEN: z.string().optional().default(""),
+  FACEBOOK_ACCESS_TOKEN: z.string().optional().default(""),
   LISTEN_INTERVAL_MINUTES: z.coerce.number().int().min(5).max(24 * 60).default(15),
   SEARCH_MAX_RESULTS: z.coerce.number().int().min(10).max(100).default(20),
 });

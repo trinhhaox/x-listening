@@ -4,8 +4,10 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { issueSession, sessionValid } from "./auth.js";
 import type { AppConfig } from "./config.js";
 import { muteKey, Store, type MentionView, type QueueState } from "./db.js";
+import { pageKey } from "./facebook.js";
 import { listenOnce, type ListenReport } from "./listen.js";
 import { buildSearchQuery } from "./query.js";
+import { lexiconWord } from "./sentiment.js";
 import { buckets, briefMarkdown, buildBrief, dayStartIso, daysEnding, localDay, spikeReason } from "./digest.js";
 import { briefPage, comparePage, dashboardPage, loginPage, mentionsCsv } from "./pages.js";
 
@@ -22,6 +24,7 @@ export function createApp(config: AppConfig, store: Store) {
     try {
       return await listenOnce(store, {
         token: config.X_BEARER_TOKEN,
+        facebookToken: config.FACEBOOK_ACCESS_TOKEN,
         maxResults: config.SEARCH_MAX_RESULTS,
         onlyTopicId: extra?.onlyTopicId,
         startTime: extra?.startTime,
@@ -91,6 +94,7 @@ export function createApp(config: AppConfig, store: Store) {
         activeTopic: topic,
         view,
         hasToken: Boolean(config.X_BEARER_TOKEN.trim()),
+        hasFacebook: Boolean(config.FACEBOOK_ACCESS_TOKEN.trim()),
         notice,
         stats: store.stats(since),
         days: series.map((row) => ({ day: row.day, count: row.posts })),
@@ -99,6 +103,7 @@ export function createApp(config: AppConfig, store: Store) {
         voices: store.topVoices(week),
         muted: store.listMuted(),
         queueNew: store.countNew(),
+        lexicon: store.listLexicon(),
         spike: spikeReason(series, today),
       }),
     );
@@ -144,20 +149,35 @@ export function createApp(config: AppConfig, store: Store) {
   app.post("/topics", async (c) => {
     const body = await c.req.parseBody();
     const name = String(body.name ?? "").trim().slice(0, 80);
-    const query = String(body.query ?? "");
+    const rawQuery = String(body.query ?? "");
+    const source = body.source === "facebook" ? "facebook" : "x";
+    const phrase = String(body.phrase ?? "").trim().slice(0, 80);
     const exclude = body.exclude_reposts === "on" || body.exclude_reposts === "true";
     if (!name) return c.redirect("/?notice=" + encodeURIComponent("Thiếu tên tần số."));
-    try {
-      buildSearchQuery(query, exclude);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Câu truy vấn không dùng được";
-      return c.redirect("/?notice=" + encodeURIComponent(message));
+    let query = rawQuery.replace(/\s+/g, " ").trim();
+    if (source === "facebook") {
+      const page = pageKey(query);
+      if (!page) {
+        return c.redirect(
+          "/?notice=" + encodeURIComponent("Facebook cần link hoặc id một Trang. Không tìm được từ khóa trên mọi bài Facebook."),
+        );
+      }
+      query = page;
+    } else {
+      try {
+        buildSearchQuery(query, exclude);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Câu truy vấn không dùng được";
+        return c.redirect("/?notice=" + encodeURIComponent(message));
+      }
     }
     store.insertTopic({
       id: randomUUID(),
       name,
-      query: query.replace(/\s+/g, " ").trim(),
-      excludeReposts: exclude,
+      query,
+      excludeReposts: source === "x" && exclude,
+      source,
+      phrase: source === "facebook" ? phrase : "",
       createdAt: new Date().toISOString(),
     });
     return c.redirect("/?notice=" + encodeURIComponent(`Đã thêm tần số “${name}”.`));
@@ -189,6 +209,23 @@ export function createApp(config: AppConfig, store: Store) {
       ? `Ghi ${report.saved} bài trên ${report.topics} tần số. ${report.errors.join(" ")}`
       : `Đã nghe ${report.topics} tần số, ghi ${report.saved} bài.`;
     return c.redirect("/?notice=" + encodeURIComponent(notice));
+  });
+
+  app.post("/lexicon", async (c) => {
+    const body = await c.req.parseBody();
+    const word = lexiconWord(String(body.word ?? ""));
+    const polarity = body.polarity === "negative" ? "negative" : body.polarity === "positive" ? "positive" : "";
+    if (!word || !polarity) return c.redirect(deskPath("", "wire", "Từ cần là một cụm chữ, tối đa ba tiếng."));
+    const changed = store.setLexiconWord(word, polarity, new Date().toISOString());
+    return c.redirect(deskPath("", "wire", `Đã thêm “${word}”. Chấm lại ${changed} bài.`));
+  });
+
+  app.post("/lexicon/delete", async (c) => {
+    const body = await c.req.parseBody();
+    const word = lexiconWord(String(body.word ?? ""));
+    if (!word) return c.redirect(deskPath("", "wire", "Không còn từ này."));
+    const changed = store.deleteLexiconWord(word);
+    return c.redirect(deskPath("", "wire", `Đã gỡ “${word}”. Chấm lại ${changed} bài.`));
   });
 
   app.post("/samples", (c) => {

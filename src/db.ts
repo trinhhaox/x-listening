@@ -6,12 +6,14 @@ import { alertReason, type AlertKind, type AlertRule } from "./alerts.js";
 import type { DigestPost } from "./digest.js";
 
 export type { AlertRule };
-import { classifySentiment } from "./sentiment.js";
+import { classifySentiment, type Sentiment } from "./sentiment.js";
 
 export type Topic = {
   id: string;
   name: string;
   query: string;
+  source: string;
+  phrase: string;
   exclude_reposts: number;
   active: number;
   since_id: string | null;
@@ -32,6 +34,7 @@ export type Mention = {
   repost_count: number;
   reply_count: number;
   quote_count: number;
+  url: string;
   sentiment: string;
   sentiment_score: number;
   sample: number;
@@ -50,7 +53,7 @@ const HEARD_M = "lower(m.author_username) NOT IN (SELECT username FROM muted_aut
 
 export function muteKey(username: string): string | null {
   const clean = username.trim().replace(/^@/, "").toLowerCase();
-  if (!/^[a-z0-9_.]{1,32}$/.test(clean)) return null;
+  if (!/^[a-z0-9_.]{1,64}$/.test(clean)) return null;
   return clean;
 }
 
@@ -88,6 +91,7 @@ export type NewMention = {
   repostCount: number;
   replyCount: number;
   quoteCount: number;
+  url?: string;
   sample?: boolean;
 };
 
@@ -154,11 +158,19 @@ export class Store {
         username TEXT PRIMARY KEY,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS lexicon (
+        word TEXT PRIMARY KEY,
+        polarity TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
     `);
     ensureColumn(db, "mentions", "starred", "starred INTEGER NOT NULL DEFAULT 0");
     ensureColumn(db, "mentions", "hidden", "hidden INTEGER NOT NULL DEFAULT 0");
     ensureColumn(db, "mentions", "note", "note TEXT NOT NULL DEFAULT ''");
     ensureColumn(db, "mentions", "queue", "queue TEXT NOT NULL DEFAULT 'new'");
+    ensureColumn(db, "mentions", "url", "url TEXT NOT NULL DEFAULT ''");
+    ensureColumn(db, "topics", "source", "source TEXT NOT NULL DEFAULT 'x'");
+    ensureColumn(db, "topics", "phrase", "phrase TEXT NOT NULL DEFAULT ''");
     return new Store(db);
   }
 
@@ -174,13 +186,29 @@ export class Store {
     return this.db.prepare("SELECT * FROM topics WHERE id = ?").get(id) as Topic | undefined;
   }
 
-  insertTopic(input: { id: string; name: string; query: string; excludeReposts: boolean; createdAt: string }): void {
+  insertTopic(input: {
+    id: string;
+    name: string;
+    query: string;
+    excludeReposts: boolean;
+    createdAt: string;
+    source?: "x" | "facebook";
+    phrase?: string;
+  }): void {
     this.db
       .prepare(
-        `INSERT INTO topics (id, name, query, exclude_reposts, active, created_at)
-         VALUES (?, ?, ?, ?, 1, ?)`,
+        `INSERT INTO topics (id, name, query, exclude_reposts, active, created_at, source, phrase)
+         VALUES (?, ?, ?, ?, 1, ?, ?, ?)`,
       )
-      .run(input.id, input.name, input.query, input.excludeReposts ? 1 : 0, input.createdAt);
+      .run(
+        input.id,
+        input.name,
+        input.query,
+        input.excludeReposts ? 1 : 0,
+        input.createdAt,
+        input.source ?? "x",
+        (input.phrase ?? "").slice(0, 80),
+      );
   }
 
   setTopicActive(id: string, active: boolean): void {
@@ -199,7 +227,7 @@ export class Store {
 
   insertMention(mention: NewMention, fetchedAt: string): boolean {
     if (this.isMuted(mention.authorUsername)) return false;
-    const feeling = classifySentiment(mention.text);
+    const feeling = classifySentiment(mention.text, this.lexiconBundle());
     const existed = Boolean(
       this.db.prepare("SELECT 1 AS ok FROM mentions WHERE id = ? AND topic_id = ?").get(mention.id, mention.topicId),
     );
@@ -207,14 +235,15 @@ export class Store {
       .prepare(
         `INSERT INTO mentions (
            id, topic_id, text, author_username, author_name, created_at, lang,
-           like_count, repost_count, reply_count, quote_count,
+           like_count, repost_count, reply_count, quote_count, url,
            sentiment, sentiment_score, sample, fetched_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id, topic_id) DO UPDATE SET
            like_count = excluded.like_count,
            repost_count = excluded.repost_count,
            reply_count = excluded.reply_count,
            quote_count = excluded.quote_count,
+           url = excluded.url,
            text = excluded.text,
            sentiment = excluded.sentiment,
            sentiment_score = excluded.sentiment_score`,
@@ -231,6 +260,7 @@ export class Store {
         mention.repostCount,
         mention.replyCount,
         mention.quoteCount,
+        mention.url ?? "",
         feeling.sentiment,
         feeling.score,
         mention.sample ? 1 : 0,
@@ -278,6 +308,53 @@ export class Store {
     if (!key) return false;
     this.db.prepare("INSERT INTO muted_authors (username, created_at) VALUES (?, ?) ON CONFLICT(username) DO NOTHING").run(key, at);
     return true;
+  }
+
+  listLexicon(): { word: string; polarity: Sentiment }[] {
+    return this.db.prepare("SELECT word, polarity FROM lexicon ORDER BY word ASC").all() as { word: string; polarity: Sentiment }[];
+  }
+
+  setLexiconWord(word: string, polarity: Sentiment, at: string): number {
+    this.db
+      .prepare(
+        `INSERT INTO lexicon (word, polarity, created_at) VALUES (?, ?, ?)
+         ON CONFLICT(word) DO UPDATE SET polarity = excluded.polarity`,
+      )
+      .run(word, polarity, at);
+    return this.reclassifyMentions();
+  }
+
+  deleteLexiconWord(word: string): number {
+    this.db.prepare("DELETE FROM lexicon WHERE word = ?").run(word);
+    return this.reclassifyMentions();
+  }
+
+  private lexiconBundle(): { positive: string[]; negative: string[] } {
+    const rows = this.listLexicon();
+    return {
+      positive: rows.filter((row) => row.polarity === "positive").map((row) => row.word),
+      negative: rows.filter((row) => row.polarity === "negative").map((row) => row.word),
+    };
+  }
+
+  private reclassifyMentions(): number {
+    const bundle = this.lexiconBundle();
+    const rows = this.db.prepare("SELECT id, topic_id, text, sentiment, sentiment_score FROM mentions").all() as Array<{
+      id: string;
+      topic_id: string;
+      text: string;
+      sentiment: string;
+      sentiment_score: number;
+    }>;
+    const update = this.db.prepare("UPDATE mentions SET sentiment = ?, sentiment_score = ? WHERE id = ? AND topic_id = ?");
+    let changed = 0;
+    for (const row of rows) {
+      const feeling = classifySentiment(row.text, bundle);
+      if (feeling.sentiment === row.sentiment && feeling.score === row.sentiment_score) continue;
+      update.run(feeling.sentiment, feeling.score, row.id, row.topic_id);
+      changed += 1;
+    }
+    return changed;
   }
 
   unmuteAuthor(username: string): void {

@@ -53,18 +53,30 @@ function lexiconHit(words: string[], tokens: string[], index: number): boolean {
   });
 }
 
-export function classifySentiment(text: string): { sentiment: Sentiment; score: number } {
+export function lexiconWord(input: string): string | null {
+  const clean = input.trim().toLowerCase().normalize("NFC").replace(/\s+/g, " ");
+  if (!/^[\p{L}\p{N}]+(?: [\p{L}\p{N}]+){0,2}$/u.test(clean) || clean.length > 40) return null;
+  return clean;
+}
+
+export function classifySentiment(
+  text: string,
+  extra?: { positive: string[]; negative: string[] },
+): { sentiment: Sentiment; score: number } {
   const tokens = text
     .toLowerCase()
     .normalize("NFC")
     .split(/[^\p{L}\p{N}]+/u)
     .filter(Boolean);
+  const added = new Set([...(extra?.positive ?? []), ...(extra?.negative ?? [])]);
+  const positiveWords = [...POSITIVE.filter((word) => !added.has(word)), ...(extra?.positive ?? [])];
+  const negativeWords = [...NEGATIVE.filter((word) => !added.has(word)), ...(extra?.negative ?? [])];
 
   let score = 0;
   for (let i = 0; i < tokens.length; i++) {
     const negated = i > 0 && (tokens[i - 1] === "không" || tokens[i - 1] === "chẳng" || tokens[i - 1] === "not");
-    const positive = lexiconHit(POSITIVE, tokens, i);
-    const negative = lexiconHit(NEGATIVE, tokens, i);
+    const positive = lexiconHit(positiveWords, tokens, i);
+    const negative = lexiconHit(negativeWords, tokens, i);
     if (positive) score += negated ? -1 : 1;
     if (negative) score += negated ? 1 : -1;
   }

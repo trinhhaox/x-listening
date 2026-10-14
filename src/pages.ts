@@ -16,6 +16,7 @@ type DashboardModel = {
   activeTopic: string;
   view: MentionView;
   hasToken: boolean;
+  hasFacebook: boolean;
   notice: string;
   stats: { mentions: number; authors: number; engagement: number; positive: number; negative: number; neutral: number };
   days: { day: string; count: number }[];
@@ -25,6 +26,7 @@ type DashboardModel = {
   muted: string[];
   queueNew: number;
   spike: string | null;
+  lexicon: { word: string; polarity: string }[];
 };
 
 export function loginPage(error = ""): string {
@@ -59,7 +61,7 @@ export function dashboardPage(model: DashboardModel): string {
         <div>
           <strong>${escapeHtml(topic.name)}</strong>
           <span>${state}${topic.last_listened_at ? ` · ${escapeHtml(formatWhen(topic.last_listened_at))}` : ""}</span>
-          <code>${escapeHtml(topic.query)}</code>
+          <code>${topic.source === "facebook" ? "Facebook" : "X"} · ${escapeHtml(topic.query)}${topic.phrase ? ` · “${escapeHtml(topic.phrase)}”` : ""}</code>
           ${error}
         </div>
         <form method="post" action="/topics/${escapeHtml(topic.id)}/toggle">
@@ -79,7 +81,8 @@ export function dashboardPage(model: DashboardModel): string {
   const rows = model.mentions
     .map((mention, index) => {
       const username = mention.author_username;
-      const href = `https://x.com/${encodeURIComponent(username)}/status/${encodeURIComponent(mention.id)}`;
+      const href = mention.url || ( /^\d+$/.test(mention.id) ? `https://x.com/${encodeURIComponent(username)}/status/${encodeURIComponent(mention.id)}` : "");
+      const openLabel = href.includes("facebook.com") || href.includes("fb.com") ? "Mở trên Facebook" : "Mở trên X";
       const action = `/mentions/${encodeURIComponent(mention.topic_id)}/${encodeURIComponent(mention.id)}`;
       const sample = mention.sample ? `<em class="stamp">Mẫu</em>` : "";
       const note = mention.note ? `<p class="note">${escapeHtml(mention.note)}</p>` : "";
@@ -98,7 +101,7 @@ export function dashboardPage(model: DashboardModel): string {
           <span>${escapeHtml(mention.topic_name)}</span>
           ${sample}
           <span class="counts">${mention.like_count} thích · ${mention.reply_count} trả lời · ${mention.repost_count} đăng lại</span>
-          ${mention.sample ? "" : `<a href="${href}" target="_blank" rel="noreferrer">Mở trên X</a>`}
+          ${mention.sample || !href ? "" : `<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${openLabel}</a>`}
         </footer>
         <div class="actions">
           ${queueButton(action, backFields, "new", "Mới", mention.queue)}
@@ -166,7 +169,7 @@ export function dashboardPage(model: DashboardModel): string {
     "Bàn nghe",
     `<header class="top">
       <div>
-        <p class="kicker"><i class="pulse"></i> Bàn nghe · bài công khai trên X</p>
+        <p class="kicker"><i class="pulse"></i> Bàn nghe · bài công khai trên X và Trang Facebook</p>
         <h1>Dây tin đang chạy qua các tần số bạn đặt.</h1>
       </div>
       <a class="nav" href="/brief">Bản tin</a>
@@ -177,6 +180,7 @@ export function dashboardPage(model: DashboardModel): string {
     ${model.notice ? `<p class="notice">${escapeHtml(model.notice)}</p>` : ""}
     ${model.spike ? `<p class="notice">Đột biến: ${escapeHtml(model.spike)}</p>` : ""}
     ${model.hasToken ? "" : `<p class="notice">Chưa có X_BEARER_TOKEN. Bàn nghe mở được, nhưng chưa hỏi được X. Gắn token trong file .env rồi chạy lại.</p>`}
+    ${model.hasFacebook ? "" : `<p class="notice">Chưa có FACEBOOK_ACCESS_TOKEN. Tần số Facebook cần token đọc Trang trong file .env.</p>`}
     <section class="meters">
       <div><span>24 giờ</span><strong>${model.stats.mentions}</strong><small>bài</small></div>
       <div><span>người viết</span><strong>${model.stats.authors}</strong><small>tài khoản</small></div>
@@ -195,8 +199,10 @@ export function dashboardPage(model: DashboardModel): string {
         <h2>Tần số</h2>
         <form class="add" method="post" action="/topics">
           <label>Tên gọi<input name="name" required maxlength="80" placeholder="Quán cà phê giấy" /></label>
-          <label>Câu trên X<textarea name="query" required maxlength="480" rows="4" placeholder="&quot;cà phê giấy&quot; OR giaycafe lang:vi"></textarea></label>
-          <label class="check"><input type="checkbox" name="exclude_reposts" checked /> Bỏ bài đăng lại</label>
+          <label>Mạng<select name="source"><option value="x">X</option><option value="facebook">Facebook</option></select></label>
+          <label>Câu trên X, hoặc link Trang Facebook<textarea name="query" required maxlength="300" rows="4" placeholder="&quot;cà phê giấy&quot; OR giaycafe lang:vi"></textarea></label>
+          <label>Cụm giữ lại trên Facebook<input name="phrase" maxlength="80" placeholder="Để trống thì lấy mọi bài của trang" /></label>
+          <label class="check"><input type="checkbox" name="exclude_reposts" checked /> Bỏ bài đăng lại trên X</label>
           <button type="submit">Thêm tần số</button>
         </form>
         <ul class="topics">${topicList || `<li class="off"><div><strong>Chưa có tần số</strong><span>Thêm một câu tìm kiếm để bắt đầu nghe.</span></div></li>`}</ul>
@@ -214,6 +220,13 @@ export function dashboardPage(model: DashboardModel): string {
           <button type="submit">Đặt chuông</button>
         </form>
         <ul class="topics">${rules}</ul>
+        <h2>Từ của bạn</h2>
+        <form class="add" method="post" action="/lexicon">
+          <label>Từ hoặc cụm<input name="word" required maxlength="40" placeholder="ngon" /></label>
+          <label>Sắc thái<select name="polarity"><option value="positive">Nghiêng tốt</option><option value="negative">Nghiêng xấu</option></select></label>
+          <button type="submit">Thêm từ</button>
+        </form>
+        <ul class="topics">${lexiconList(model.lexicon, backFields) || `<li class="off"><div><strong>Chưa thêm từ</strong><span>Từ thêm được tính cùng bộ có sẵn, và ghi đè nếu trùng.</span></div></li>`}</ul>
         <h2>Đã tắt tiếng</h2>
         <ul class="topics">${muted || `<li class="off"><div><strong>Chưa tắt ai</strong><span>Tắt tiếng trên một bài để chặn bài sau của tài khoản đó.</span></div></li>`}</ul>
         <form method="post" action="/samples"><button class="quiet" type="submit">Nạp tin mẫu</button></form>
@@ -319,6 +332,16 @@ export function comparePage(model: { topics: Topic[]; left: string; right: strin
     <p class="legend"><i class="left"></i>${escapeHtml(leftName)} <i class="right"></i>${escapeHtml(rightName)}</p>
     <section class="days compare-days">${bars}</section>`,
   );
+}
+
+function lexiconList(words: { word: string; polarity: string }[], backFields: string): string {
+  return words
+    .map((item) => {
+      const label = item.polarity === "negative" ? "nghiêng xấu" : "nghiêng tốt";
+      return `<li class="pair"><div><strong>${escapeHtml(item.word)}</strong><span>${label}</span></div>
+        <form method="post" action="/lexicon/delete">${backFields}<input type="hidden" name="word" value="${escapeHtml(item.word)}" /><button class="quiet" type="submit">Gỡ</button></form></li>`;
+    })
+    .join("");
 }
 
 function queueButton(action: string, backFields: string, queue: string, label: string, current: string): string {

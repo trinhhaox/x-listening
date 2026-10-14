@@ -6,6 +6,7 @@ import { createApp } from "../src/app.js";
 import { issueSession, sessionValid } from "../src/auth.js";
 import type { AppConfig } from "../src/config.js";
 import { Store } from "../src/db.js";
+import { pageKey } from "../src/facebook.js";
 import { listenOnce, PAGE_CAP } from "../src/listen.js";
 import { buildSearchQuery } from "../src/query.js";
 import { classifySentiment } from "../src/sentiment.js";
@@ -17,6 +18,7 @@ function testConfig(): AppConfig {
     DATABASE_PATH: ":memory:",
     ADMIN_PASSWORD: "mat-khau-dai",
     X_BEARER_TOKEN: "",
+    FACEBOOK_ACCESS_TOKEN: "",
     LISTEN_INTERVAL_MINUTES: 15,
     SEARCH_MAX_RESULTS: 10,
   };
@@ -33,6 +35,8 @@ test("sắc thái tiếng Việt có phủ định", () => {
   assert.equal(classifySentiment("Thất vọng, phục vụ quá chậm").sentiment, "negative");
   assert.equal(classifySentiment("không tốt").sentiment, "negative");
   assert.equal(classifySentiment("hôm nay trời mưa").sentiment, "neutral");
+  assert.equal(classifySentiment("ly này ngon", { positive: ["ngon"], negative: [] }).sentiment, "positive");
+  assert.equal(classifySentiment("Nước ổn", { positive: [], negative: ["ổn"] }).sentiment, "negative");
 });
 
 test("lưu bài một lần và cập nhật số liệu", () => {
@@ -344,6 +348,99 @@ function post(id: string, createdAt: string, author: string, sentiment: string, 
     starred,
   };
 }
+
+test("từ của người vận hành chấm lại bài đã lưu", () => {
+  const store = Store.open(":memory:");
+  store.insertTopic({
+    id: "t1",
+    name: "Quán",
+    query: "cà phê",
+    excludeReposts: true,
+    createdAt: "2026-10-14T00:00:00.000Z",
+  });
+  store.insertMention(
+    {
+      id: "1",
+      topicId: "t1",
+      text: "Ly này ngon",
+      authorUsername: "lan",
+      authorName: "Lan",
+      createdAt: "2026-10-14T01:00:00.000Z",
+      lang: "vi",
+      likeCount: 0,
+      repostCount: 0,
+      replyCount: 0,
+      quoteCount: 0,
+    },
+    "2026-10-14T01:00:00.000Z",
+  );
+  assert.equal(store.listMentions()[0]?.sentiment, "neutral");
+  const changed = store.setLexiconWord("ngon", "positive", "2026-10-14T02:00:00.000Z");
+  assert.equal(changed, 1);
+  assert.equal(store.listMentions()[0]?.sentiment, "positive");
+  store.deleteLexiconWord("ngon");
+  assert.equal(store.listMentions()[0]?.sentiment, "neutral");
+  store.close();
+});
+
+test("trang Facebook nhận link và từ chối nhóm", () => {
+  assert.equal(pageKey("https://www.facebook.com/giaycafe"), "giaycafe");
+  assert.equal(pageKey("https://facebook.com/pages/Quan/1234567890"), "1234567890");
+  assert.equal(pageKey("https://www.facebook.com/groups/123"), null);
+  assert.equal(pageKey("cà phê giấy"), null);
+});
+
+test("nghe Facebook chỉ lưu bài có cụm và nhớ mốc giờ", async () => {
+  const store = Store.open(":memory:");
+  store.insertTopic({
+    id: "fb",
+    name: "Trang quán",
+    query: "giaycafe",
+    excludeReposts: false,
+    source: "facebook",
+    phrase: "cà phê",
+    createdAt: "2026-10-14T00:00:00.000Z",
+  });
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    if (!url.includes("published_posts")) {
+      return new Response(JSON.stringify({ id: "11111", name: "Quán" }), { status: 200 });
+    }
+    assert.equal(url.includes("since="), false);
+    return new Response(
+      JSON.stringify({
+        data: [
+          {
+            id: "11111_22222",
+            message: "Hôm nay hết cà phê giấy",
+            created_time: "2026-10-14T03:00:00+0000",
+            permalink_url: "https://www.facebook.com/giaycafe/posts/22222",
+            from: { id: "11111", name: "Quán giấy" },
+            reactions: { summary: { total_count: 4 } },
+            comments: { summary: { total_count: 1 } },
+            shares: { count: 2 },
+          },
+          {
+            id: "11111_33333",
+            message: "Chỉ bán trà đá",
+            created_time: "2026-10-14T04:00:00+0000",
+            permalink_url: "https://www.facebook.com/giaycafe/posts/33333",
+            from: { id: "11111", name: "Quán giấy" },
+          },
+        ],
+      }),
+      { status: 200 },
+    );
+  };
+  const report = await listenOnce(store, { token: "", facebookToken: "fb-token", maxResults: 10, fetchImpl });
+  assert.equal(report.errors.length, 0);
+  assert.equal(report.saved, 1);
+  const row = store.listMentions()[0];
+  assert.equal(row?.text, "Hôm nay hết cà phê giấy");
+  assert.equal(row?.url, "https://www.facebook.com/giaycafe/posts/22222");
+  assert.equal(store.getTopic("fb")?.since_id, String(Math.floor(Date.parse("2026-10-14T04:00:00+0000") / 1000)));
+  store.close();
+});
 
 test("khách chưa đăng nhập không vào bàn nghe", async () => {
   const store = Store.open(":memory:");
