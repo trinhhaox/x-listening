@@ -1,4 +1,5 @@
 import type { AlertHitRow, AlertRule, MentionRow, MentionView, Topic, Voice } from "./db.js";
+import type { Brief, DayCount } from "./digest.js";
 
 export function escapeHtml(value: string): string {
   return value
@@ -21,6 +22,9 @@ type DashboardModel = {
   alerts: AlertRule[];
   hits: AlertHitRow[];
   voices: Voice[];
+  muted: string[];
+  queueNew: number;
+  spike: string | null;
 };
 
 export function loginPage(error = ""): string {
@@ -61,6 +65,9 @@ export function dashboardPage(model: DashboardModel): string {
         <form method="post" action="/topics/${escapeHtml(topic.id)}/toggle">
           <button type="submit">${topic.active ? "Tạm dừng" : "Nghe lại"}</button>
         </form>
+        <form method="post" action="/topics/${escapeHtml(topic.id)}/backfill">
+          <button class="quiet" type="submit">Lấy 7 ngày</button>
+        </form>
         <form method="post" action="/topics/${escapeHtml(topic.id)}/delete" onsubmit="return confirm('Gỡ chủ đề này và toàn bộ tin đã lưu?')">
           <button type="submit" class="quiet">Gỡ</button>
         </form>
@@ -94,8 +101,12 @@ export function dashboardPage(model: DashboardModel): string {
           ${mention.sample ? "" : `<a href="${href}" target="_blank" rel="noreferrer">Mở trên X</a>`}
         </footer>
         <div class="actions">
+          ${queueButton(action, backFields, "new", "Mới", mention.queue)}
+          ${queueButton(action, backFields, "reading", "Đang xử lý", mention.queue)}
+          ${queueButton(action, backFields, "done", "Xong", mention.queue)}
           <form method="post" action="${action}/star">${backFields}<button class="quiet" type="submit">${mention.starred ? "Bỏ ghim" : "Ghim"}</button></form>
           <form method="post" action="${action}/hide">${backFields}<button class="quiet" type="submit">${mention.hidden ? "Hiện lại" : "Giấu"}</button></form>
+          <form method="post" action="/mutes">${backFields}<input type="hidden" name="username" value="${escapeHtml(username)}" /><button class="quiet" type="submit">Tắt tiếng</button></form>
           <form class="note-form" method="post" action="${action}/note">${backFields}<input name="note" maxlength="280" value="${escapeHtml(mention.note)}" placeholder="Ghi chú nội bộ" /><button class="quiet" type="submit">Lưu chú</button></form>
         </div>
       </article>`;
@@ -130,6 +141,12 @@ export function dashboardPage(model: DashboardModel): string {
         `<span><b>${escapeHtml(voice.author_name)}</b> @${escapeHtml(voice.author_username)} · ${voice.posts} bài</span>`,
     )
     .join("");
+  const muted = model.muted
+    .map(
+      (username) => `<li class="pair"><div><strong>@${escapeHtml(username)}</strong></div>
+        <form method="post" action="/mutes/${encodeURIComponent(username)}/delete">${backFields}<button class="quiet" type="submit">Bỏ tắt</button></form></li>`,
+    )
+    .join("");
   const viewLink = (view: MentionView, label: string) => {
     const params = new URLSearchParams();
     if (model.activeTopic) params.set("topic", model.activeTopic);
@@ -152,10 +169,13 @@ export function dashboardPage(model: DashboardModel): string {
         <p class="kicker"><i class="pulse"></i> Bàn nghe · bài công khai trên X</p>
         <h1>Dây tin đang chạy qua các tần số bạn đặt.</h1>
       </div>
+      <a class="nav" href="/brief">Bản tin</a>
+      <a class="nav" href="/compare">So tần số</a>
       <form method="post" action="/listen"><button type="submit">Lắng nghe ngay</button></form>
       <form method="post" action="/logout"><button class="quiet" type="submit">Thoát</button></form>
     </header>
     ${model.notice ? `<p class="notice">${escapeHtml(model.notice)}</p>` : ""}
+    ${model.spike ? `<p class="notice">Đột biến: ${escapeHtml(model.spike)}</p>` : ""}
     ${model.hasToken ? "" : `<p class="notice">Chưa có X_BEARER_TOKEN. Bàn nghe mở được, nhưng chưa hỏi được X. Gắn token trong file .env rồi chạy lại.</p>`}
     <section class="meters">
       <div><span>24 giờ</span><strong>${model.stats.mentions}</strong><small>bài</small></div>
@@ -194,13 +214,15 @@ export function dashboardPage(model: DashboardModel): string {
           <button type="submit">Đặt chuông</button>
         </form>
         <ul class="topics">${rules}</ul>
+        <h2>Đã tắt tiếng</h2>
+        <ul class="topics">${muted || `<li class="off"><div><strong>Chưa tắt ai</strong><span>Tắt tiếng trên một bài để chặn bài sau của tài khoản đó.</span></div></li>`}</ul>
         <form method="post" action="/samples"><button class="quiet" type="submit">Nạp tin mẫu</button></form>
         <form method="post" action="/samples/clear"><button class="quiet" type="submit">Xóa tin mẫu</button></form>
       </aside>
       <section class="wire">
         <div class="wire-head">
           <h2>Dây tin</h2>
-          <nav class="views">${viewLink("wire", "Đang xem")}${viewLink("starred", "Đã ghim")}${viewLink("hidden", "Đã giấu")}</nav>
+          <nav class="views">${viewLink("wire", "Dây tin")}${viewLink("new", `Mới ${model.queueNew}`)}${viewLink("reading", "Đang xử lý")}${viewLink("done", "Xong")}${viewLink("starred", "Đã ghim")}${viewLink("hidden", "Đã giấu")}</nav>
           <form method="get" action="/">
             <input type="hidden" name="view" value="${escapeHtml(model.view === "wire" ? "" : model.view)}" />
             <select name="topic" onchange="this.form.submit()">
@@ -228,6 +250,80 @@ export function mentionsCsv(rows: MentionRow[]): string {
 
 function csvCell(value: string | number): string {
   return `"${String(value).replaceAll('"', '""')}"`;
+}
+
+export function briefPage(brief: Brief): string {
+  const negative = brief.negative
+    .map((post) => `<li><b>@${escapeHtml(post.authorUsername)}</b> · ${escapeHtml(post.topicName)}<p>${escapeHtml(post.text)}</p></li>`)
+    .join("");
+  const authors = brief.newAuthors
+    .map((author) => `<li><b>@${escapeHtml(author.username)}</b> ${escapeHtml(author.name)} · ${author.posts} bài</li>`)
+    .join("");
+  const starred = brief.starred
+    .map((post) => `<li><b>@${escapeHtml(post.authorUsername)}</b><p>${escapeHtml(post.text)}</p></li>`)
+    .join("");
+  return layout(
+    "Bản tin",
+    `<header class="top">
+      <div>
+        <p class="kicker">Bản tin cuối ngày</p>
+        <h1>${escapeHtml(brief.day.split("-").reverse().join("/"))}</h1>
+      </div>
+      <a class="nav" href="/">Dây tin</a>
+      <a class="nav" href="/brief.md">Tải Markdown</a>
+    </header>
+    <section class="meters">
+      <div><span>bài</span><strong>${brief.posts}</strong></div>
+      <div><span>nghiêng xấu</span><strong>${brief.negative.length}</strong></div>
+      <div><span>người viết lần đầu</span><strong>${brief.newAuthors.length}</strong></div>
+      <div><span>đang ghim</span><strong>${brief.starred.length}</strong></div>
+    </section>
+    <h2>Nghiêng xấu</h2>
+    <ul class="brief">${negative || `<li class="empty">Không có.</li>`}</ul>
+    <h2>Người viết lần đầu</h2>
+    <ul class="brief">${authors || `<li class="empty">Không có.</li>`}</ul>
+    <h2>Đang ghim</h2>
+    <ul class="brief">${starred || `<li class="empty">Không có.</li>`}</ul>`,
+  );
+}
+
+export function comparePage(model: { topics: Topic[]; left: string; right: string; series: { day: string; left: DayCount; right: DayCount }[] }): string {
+  const options = (selected: string) =>
+    model.topics
+      .map((topic) => `<option value="${escapeHtml(topic.id)}"${topic.id === selected ? " selected" : ""}>${escapeHtml(topic.name)}</option>`)
+      .join("");
+  const leftName = model.topics.find((topic) => topic.id === model.left)?.name ?? "Tần số A";
+  const rightName = model.topics.find((topic) => topic.id === model.right)?.name ?? "Tần số B";
+  const max = Math.max(1, ...model.series.flatMap((row) => [row.left.posts, row.right.posts]));
+  const bars = model.series
+    .map((row) => {
+      const leftHeight = Math.max(8, Math.round((row.left.posts / max) * 100));
+      const rightHeight = Math.max(8, Math.round((row.right.posts / max) * 100));
+      return `<div class="bar" title="${escapeHtml(row.day)}"><span class="pair-bars"><i class="left" style="height:${leftHeight}%"></i><i class="right" style="height:${rightHeight}%"></i></span><span>${escapeHtml(row.day.slice(5))}</span><small>${row.left.posts}/${row.right.posts} bài · ${row.left.authors}/${row.right.authors} người</small></div>`;
+    })
+    .join("");
+  return layout(
+    "So tần số",
+    `<header class="top">
+      <div>
+        <p class="kicker">Bảy ngày, giờ Việt Nam</p>
+        <h1>Hai tần số cạnh nhau.</h1>
+      </div>
+      <a class="nav" href="/">Dây tin</a>
+    </header>
+    <form class="compare-form" method="get" action="/compare">
+      <label>Tần số A<select name="left">${options(model.left)}</select></label>
+      <label>Tần số B<select name="right">${options(model.right)}</select></label>
+      <button type="submit">So</button>
+    </form>
+    <p class="legend"><i class="left"></i>${escapeHtml(leftName)} <i class="right"></i>${escapeHtml(rightName)}</p>
+    <section class="days compare-days">${bars}</section>`,
+  );
+}
+
+function queueButton(action: string, backFields: string, queue: string, label: string, current: string): string {
+  const selected = current === queue ? " current" : "";
+  return `<form method="post" action="${action}/queue">${backFields}<input type="hidden" name="queue" value="${queue}" /><button class="quiet${selected}" type="submit">${label}</button></form>`;
 }
 
 function labelSentiment(value: string): string {
@@ -295,6 +391,14 @@ function layout(title: string, body: string): string {
     @keyframes beat { 50% { transform: scale(0.7); opacity: 0.55; } }
     .top, .wire-head, .meters { display: flex; gap: 18px; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; }
     .top { margin-bottom: 22px; }
+    a.nav { background: transparent; color: var(--ink); border: 1px solid var(--line); border-radius: 999px; padding: 10px 16px; text-decoration: none; }
+    .pair-bars { display: flex; gap: 6px; align-items: end; height: 72px; }
+    .pair-bars i { display: block; width: 10px; border-radius: 4px 4px 2px 2px; }
+    .pair-bars i.left { background: #c9844a; }
+    .pair-bars i.right { background: var(--moss); }
+    .legend i { display: inline-block; width: 10px; height: 10px; margin-right: 6px; }
+    .legend .left { background: #c9844a; }
+    .legend .right { background: var(--moss); }
     button, select, a { font: inherit; }
     button, .wire-head a {
       background: var(--ink); color: #f6efe4; border: 0; border-radius: 999px; padding: 10px 16px; cursor: pointer; text-decoration: none;
@@ -319,16 +423,23 @@ function layout(title: string, body: string): string {
     .days { display: flex; gap: 8px; align-items: end; min-height: 92px; margin-bottom: 22px; }
     .bar { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 92px; justify-content: end; }
     .bar i { display: block; width: 100%; max-width: 28px; background: #c9844a; border-radius: 6px 6px 2px 2px; }
-    .bar span { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.72rem; color: var(--muted); }
+    .bar span, .bar small { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.72rem; color: var(--muted); }
+    .compare-days { align-items: end; }
+    .compare-days .bar { height: auto; }
+    .compare-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; margin-bottom: 16px; }
+    .brief { list-style: none; padding: 0; }
+    .brief li { padding: 10px 0; border-top: 1px solid var(--line); }
+    .legend { color: var(--muted); }
     .split { display: grid; grid-template-columns: minmax(260px, 0.85fr) 1.6fr; gap: 28px; }
     aside { position: sticky; top: 16px; align-self: start; }
     .topics { list-style: none; padding: 0; margin: 16px 0; display: grid; gap: 12px; }
-    .topics li { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: start; padding-top: 12px; border-top: 1px solid var(--line); }
+    .topics li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 12px; border-top: 1px solid var(--line); }
+    .topics li > div { flex: 1 0 100%; }
     .topics strong { display: block; }
     .topics span, .topics code { display: block; color: var(--muted); font-size: 0.86rem; }
     .topics code { font-family: "IBM Plex Mono", ui-monospace, monospace; white-space: pre-wrap; margin-top: 4px; }
     .topics li.off strong { color: var(--muted); }
-    .topics li.pair { grid-template-columns: 1fr auto; }
+    .topics li.pair { display: grid; grid-template-columns: 1fr auto; align-items: center; }
     .voices { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; margin: 0 0 22px; }
     .voices h2 { width: 100%; }
     .voices span { color: var(--muted); }
@@ -339,6 +450,7 @@ function layout(title: string, body: string): string {
     .views a { border: 1px solid var(--line); border-radius: 999px; padding: 8px 12px; text-decoration: none; color: var(--ink); }
     .views a.on { background: var(--ink); color: #f6efe4; }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .actions button.current { background: var(--ink); color: #f6efe4; }
     .note-form { display: flex; gap: 8px; flex: 1; min-width: min(100%, 280px); }
     .note-form input { margin: 0; }
     article .note { color: var(--clay); margin: 0; }
@@ -357,6 +469,7 @@ function layout(title: string, body: string): string {
       .split { grid-template-columns: 1fr; }
       aside { position: static; }
       .meters { display: grid; grid-template-columns: 1fr 1fr; }
+      .compare-form { grid-template-columns: 1fr; }
     }
     @media (prefers-reduced-motion: reduce) {
       .pulse, article { animation: none; }

@@ -27,7 +27,7 @@ type SearchPayload = {
     };
   }>;
   includes?: { users?: Array<{ id: string; username?: string; name?: string }> };
-  meta?: { newest_id?: string; result_count?: number };
+  meta?: { newest_id?: string; result_count?: number; next_token?: string };
   detail?: string;
   title?: string;
   errors?: Array<{ message?: string }>;
@@ -48,7 +48,8 @@ export async function searchRecentPosts(
   maxResults: number,
   sinceId: string | null,
   fetchImpl: typeof fetch = fetch,
-): Promise<{ posts: PublicPost[]; newestId: string | null }> {
+  page: { nextToken?: string | null; startTime?: string | null } = {},
+): Promise<{ posts: PublicPost[]; newestId: string | null; nextToken: string | null }> {
   const url = new URL("https://api.x.com/2/tweets/search/recent");
   url.searchParams.set("query", query);
   url.searchParams.set("max_results", String(maxResults));
@@ -56,6 +57,10 @@ export async function searchRecentPosts(
   url.searchParams.set("expansions", "author_id");
   url.searchParams.set("user.fields", "username,name");
   if (sinceId && /^\d+$/.test(sinceId)) url.searchParams.set("since_id", sinceId);
+  if (page.startTime && !Number.isNaN(Date.parse(page.startTime))) url.searchParams.set("start_time", page.startTime);
+  if (page.nextToken && page.nextToken.length <= 2000 && !/[\u0000-\u001f]/.test(page.nextToken)) {
+    url.searchParams.set("next_token", page.nextToken);
+  }
 
   const response = await fetchImpl(url, {
     headers: { Authorization: `Bearer ${token}` },
@@ -84,5 +89,10 @@ export async function searchRecentPosts(
     } satisfies PublicPost;
   });
 
-  return { posts, newestId: payload.meta?.newest_id ?? posts[0]?.id ?? null };
+  const nextToken = payload.meta?.next_token;
+  return {
+    posts,
+    newestId: payload.meta?.newest_id ?? null,
+    nextToken: nextToken && nextToken.length <= 2000 ? nextToken : null,
+  };
 }

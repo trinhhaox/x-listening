@@ -25,7 +25,17 @@ from:username -is:reply
 
 Ô **Bỏ bài đăng lại** tự thêm `-is:retweet` nếu câu chưa có `is:retweet`.
 
-Mỗi lượt chỉ lấy một trang (mặc định 20 bài) cho mỗi tần số đang bật, rồi nhớ `since_id` để lần sau lấy phần mới hơn. Lịch mặc định là 15 phút.
+Mỗi lượt lấy tối đa 5 trang cho mỗi tần số đang bật. Mốc `since_id` chỉ nhích khi đã lấy hết trang. Nếu còn trang, mốc giữ nguyên để lần sau không bỏ bài. Nút **Lấy 7 ngày** hỏi lại khoảng 7 ngày gần nhất của một tần số. Recent Search không có bài cũ hơn khoảng 7 ngày. Lịch mặc định là 15 phút.
+
+**Tắt tiếng** chặn bài sau của một tài khoản và đưa bài đã lưu của họ ra khỏi dây tin và số liệu. **Bỏ tắt** để hiện lại.
+
+Mỗi bài có trạng thái **Mới**, **Đang xử lý**, **Xong**. Bài xong vẫn được tính. **Giấu** mới loại bài khỏi số liệu.
+
+**Đột biến** hiện khi hôm nay có ít nhất 5 bài và số đó gấp từ 3 lần trung vị của 6 ngày trước (giờ Việt Nam). Ngày không có bài được tính là 0.
+
+**Bản tin** (`/brief`) gom bài trong ngày, bài nghiêng xấu, người viết lần đầu và bài đang ghim. Có bản Markdown tại `/brief.md`.
+
+**So tần số** (`/compare`) vẽ số bài và số người viết của hai tần số trên 7 ngày.
 
 Sắc thái “nghiêng tốt / nghiêng xấu” là đếm từ vựng tiếng Việt và tiếng Anh, có xét “không” đứng ngay trước. Đây không phải mô hình cảm xúc.
 

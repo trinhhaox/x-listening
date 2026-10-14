@@ -3,10 +3,11 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { issueSession, sessionValid } from "./auth.js";
 import type { AppConfig } from "./config.js";
-import { Store, type MentionView } from "./db.js";
+import { muteKey, Store, type MentionView, type QueueState } from "./db.js";
 import { listenOnce, type ListenReport } from "./listen.js";
 import { buildSearchQuery } from "./query.js";
-import { dashboardPage, loginPage, mentionsCsv } from "./pages.js";
+import { buckets, briefMarkdown, buildBrief, dayStartIso, daysEnding, localDay, spikeReason } from "./digest.js";
+import { briefPage, comparePage, dashboardPage, loginPage, mentionsCsv } from "./pages.js";
 
 const COOKIE = "xl_session";
 const attempts = new Map<string, { count: number; resetAt: number }>();
@@ -15,11 +16,16 @@ export function createApp(config: AppConfig, store: Store) {
   const app = new Hono();
   let listening = false;
 
-  async function runListen(): Promise<ListenReport> {
+  async function runListen(extra?: { onlyTopicId?: string; startTime?: string }): Promise<ListenReport> {
     if (listening) return { saved: 0, topics: 0, errors: ["Đang nghe một lượt khác."] };
     listening = true;
     try {
-      return await listenOnce(store, { token: config.X_BEARER_TOKEN, maxResults: config.SEARCH_MAX_RESULTS });
+      return await listenOnce(store, {
+        token: config.X_BEARER_TOKEN,
+        maxResults: config.SEARCH_MAX_RESULTS,
+        onlyTopicId: extra?.onlyTopicId,
+        startTime: extra?.startTime,
+      });
     } finally {
       listening = false;
     }
@@ -76,6 +82,8 @@ export function createApp(config: AppConfig, store: Store) {
     const view = readView(c.req.query("view"));
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const week = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const today = localDay(new Date());
+    const series = buckets(store.listHeardSince(dayStartIso(daysEnding(today, 7)[0] ?? today)), daysEnding(today, 7), topic);
     return c.html(
       dashboardPage({
         topics: store.listTopics(),
@@ -85,10 +93,41 @@ export function createApp(config: AppConfig, store: Store) {
         hasToken: Boolean(config.X_BEARER_TOKEN.trim()),
         notice,
         stats: store.stats(since),
-        days: store.volumeByDay(7),
+        days: series.map((row) => ({ day: row.day, count: row.posts })),
         alerts: store.listAlerts(),
         hits: store.listOpenHits(),
         voices: store.topVoices(week),
+        muted: store.listMuted(),
+        queueNew: store.countNew(),
+        spike: spikeReason(series, today),
+      }),
+    );
+  });
+
+  app.get("/brief", (c) => c.html(briefPage(todayBrief(store))));
+
+  app.get("/brief.md", (c) =>
+    c.body(briefMarkdown(todayBrief(store)), 200, {
+      "content-type": "text/markdown; charset=utf-8",
+      "content-disposition": "attachment; filename=ban-tin.md",
+    }),
+  );
+
+  app.get("/compare", (c) => {
+    const topics = store.listTopics();
+    const left = c.req.query("left") || topics[0]?.id || "";
+    const right = c.req.query("right") || topics.find((topic) => topic.id !== left)?.id || left;
+    const today = localDay(new Date());
+    const days = daysEnding(today, 7);
+    const posts = store.listHeardSince(dayStartIso(days[0] ?? today));
+    const leftSeries = buckets(posts, days, left);
+    const rightSeries = buckets(posts, days, right);
+    return c.html(
+      comparePage({
+        topics,
+        left,
+        right,
+        series: days.map((day, index) => ({ day, left: leftSeries[index]!, right: rightSeries[index]! })),
       }),
     );
   });
@@ -128,6 +167,15 @@ export function createApp(config: AppConfig, store: Store) {
     const topic = store.getTopic(c.req.param("id"));
     if (topic) store.setTopicActive(topic.id, topic.active !== 1);
     return c.redirect("/");
+  });
+
+  app.post("/topics/:id/backfill", async (c) => {
+    const id = c.req.param("id");
+    if (!safeKey(id) || !store.getTopic(id)) return c.redirect(deskPath("", "wire", "Không còn tần số này."));
+    const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const report = await runListen({ onlyTopicId: id, startTime: start });
+    const notice = [`Ghi ${report.saved} bài trong 7 ngày.`, ...report.errors].filter(Boolean).join(" ");
+    return c.redirect(deskPath("", "wire", notice));
   });
 
   app.post("/topics/:id/delete", (c) => {
@@ -207,6 +255,30 @@ export function createApp(config: AppConfig, store: Store) {
     return c.redirect(deskPath(back.topic, back.view));
   });
 
+  app.post("/mentions/:topicId/:mentionId/queue", async (c) => {
+    const topicId = c.req.param("topicId");
+    const mentionId = c.req.param("mentionId");
+    const body = await c.req.parseBody();
+    const queue = String(body.queue ?? "");
+    if (safeKey(topicId) && safeKey(mentionId) && isQueue(queue)) store.setMentionQueue(topicId, mentionId, queue);
+    return c.redirect(deskPath(String(body.topic ?? ""), readView(String(body.view ?? ""))));
+  });
+
+  app.post("/mutes", async (c) => {
+    const body = await c.req.parseBody();
+    const username = String(body.username ?? "");
+    if (!muteKey(username) || !store.muteAuthor(username, new Date().toISOString())) {
+      return c.redirect(deskPath(String(body.topic ?? ""), readView(String(body.view ?? "")), "Tên tài khoản không dùng được."));
+    }
+    return c.redirect(deskPath(String(body.topic ?? ""), readView(String(body.view ?? "")), `Đã tắt tiếng @${muteKey(username)}.`));
+  });
+
+  app.post("/mutes/:username/delete", async (c) => {
+    store.unmuteAuthor(c.req.param("username"));
+    const back = await backFrom(c);
+    return c.redirect(deskPath(back.topic, back.view, "Đã bỏ tắt tiếng."));
+  });
+
   app.post("/mentions/:topicId/:mentionId/note", async (c) => {
     const topicId = c.req.param("topicId");
     const mentionId = c.req.param("mentionId");
@@ -226,13 +298,22 @@ export function createApp(config: AppConfig, store: Store) {
   return { app, runListen };
 }
 
+function todayBrief(store: Store) {
+  const today = localDay(new Date());
+  return buildBrief(today, store.listHeardSince(dayStartIso(today)), store.listFirstSeen());
+}
+
 function safeKey(value: string): boolean {
   return /^[\w-]{1,80}$/.test(value);
 }
 
 function readView(value: string | undefined): MentionView {
-  if (value === "starred" || value === "hidden") return value;
+  if (value === "new" || value === "reading" || value === "done" || value === "starred" || value === "hidden") return value;
   return "wire";
+}
+
+function isQueue(value: string): value is QueueState {
+  return value === "new" || value === "reading" || value === "done";
 }
 
 function deskPath(topic: string, view: MentionView, notice?: string): string {

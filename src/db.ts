@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { alertReason, type AlertKind, type AlertRule } from "./alerts.js";
+import type { DigestPost } from "./digest.js";
 
 export type { AlertRule };
 import { classifySentiment } from "./sentiment.js";
@@ -38,9 +39,20 @@ export type Mention = {
   starred: number;
   hidden: number;
   note: string;
+  queue: QueueState;
 };
 
-export type MentionView = "wire" | "starred" | "hidden";
+export type MentionView = "wire" | "new" | "reading" | "done" | "starred" | "hidden";
+export type QueueState = "new" | "reading" | "done";
+
+const HEARD = "lower(author_username) NOT IN (SELECT username FROM muted_authors)";
+const HEARD_M = "lower(m.author_username) NOT IN (SELECT username FROM muted_authors)";
+
+export function muteKey(username: string): string | null {
+  const clean = username.trim().replace(/^@/, "").toLowerCase();
+  if (!/^[a-z0-9_.]{1,32}$/.test(clean)) return null;
+  return clean;
+}
 
 export type AlertHitRow = {
   id: string;
@@ -138,10 +150,15 @@ export class Store {
         seen INTEGER NOT NULL DEFAULT 0,
         UNIQUE (alert_id, mention_id, topic_id)
       );
+      CREATE TABLE IF NOT EXISTS muted_authors (
+        username TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL
+      );
     `);
     ensureColumn(db, "mentions", "starred", "starred INTEGER NOT NULL DEFAULT 0");
     ensureColumn(db, "mentions", "hidden", "hidden INTEGER NOT NULL DEFAULT 0");
     ensureColumn(db, "mentions", "note", "note TEXT NOT NULL DEFAULT ''");
+    ensureColumn(db, "mentions", "queue", "queue TEXT NOT NULL DEFAULT 'new'");
     return new Store(db);
   }
 
@@ -181,6 +198,7 @@ export class Store {
   }
 
   insertMention(mention: NewMention, fetchedAt: string): boolean {
+    if (this.isMuted(mention.authorUsername)) return false;
     const feeling = classifySentiment(mention.text);
     const existed = Boolean(
       this.db.prepare("SELECT 1 AS ok FROM mentions WHERE id = ? AND topic_id = ?").get(mention.id, mention.topicId),
@@ -223,17 +241,102 @@ export class Store {
   }
 
   listMentions(topicId?: string, limit = 80, view: MentionView = "wire"): MentionRow[] {
-    const visibility =
-      view === "hidden" ? "m.hidden = 1" : view === "starred" ? "m.starred = 1 AND m.hidden = 0" : "m.hidden = 0";
+    const visibility = mentionFilter(view);
+    const heard = view === "hidden" ? "1 = 1" : HEARD_M;
     return this.db
       .prepare(
         `SELECT m.*, t.name AS topic_name
          FROM mentions m JOIN topics t ON t.id = m.topic_id
-         WHERE (? = '' OR m.topic_id = ?) AND ${visibility}
+         WHERE (? = '' OR m.topic_id = ?) AND ${visibility} AND ${heard}
          ORDER BY m.created_at DESC
          LIMIT ?`,
       )
       .all(topicId ?? "", topicId ?? "", limit) as MentionRow[];
+  }
+
+  setMentionQueue(topicId: string, mentionId: string, queue: QueueState): boolean {
+    const result = this.db
+      .prepare("UPDATE mentions SET queue = ? WHERE topic_id = ? AND id = ?")
+      .run(queue, topicId, mentionId);
+    return result.changes > 0;
+  }
+
+  listMuted(): string[] {
+    return (this.db.prepare("SELECT username FROM muted_authors ORDER BY username ASC").all() as Array<{ username: string }>).map(
+      (row) => row.username,
+    );
+  }
+
+  isMuted(username: string): boolean {
+    const key = muteKey(username);
+    if (!key) return false;
+    return Boolean(this.db.prepare("SELECT 1 AS ok FROM muted_authors WHERE username = ?").get(key));
+  }
+
+  muteAuthor(username: string, at: string): boolean {
+    const key = muteKey(username);
+    if (!key) return false;
+    this.db.prepare("INSERT INTO muted_authors (username, created_at) VALUES (?, ?) ON CONFLICT(username) DO NOTHING").run(key, at);
+    return true;
+  }
+
+  unmuteAuthor(username: string): void {
+    const key = muteKey(username);
+    if (!key) return;
+    this.db.prepare("DELETE FROM muted_authors WHERE username = ?").run(key);
+  }
+
+  listHeardSince(sinceIso: string): DigestPost[] {
+    const rows = this.db
+      .prepare(
+        `SELECT m.id, m.topic_id, t.name AS topic_name, m.text, m.author_username, m.author_name,
+                m.created_at, m.sentiment, m.starred
+         FROM mentions m JOIN topics t ON t.id = m.topic_id
+         WHERE m.hidden = 0 AND ${HEARD_M} AND m.created_at >= ?
+         ORDER BY m.created_at ASC`,
+      )
+      .all(sinceIso) as Array<{
+      id: string;
+      topic_id: string;
+      topic_name: string;
+      text: string;
+      author_username: string;
+      author_name: string;
+      created_at: string;
+      sentiment: string;
+      starred: number;
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      topicId: row.topic_id,
+      topicName: row.topic_name,
+      text: row.text,
+      authorUsername: row.author_username,
+      authorName: row.author_name,
+      createdAt: row.created_at,
+      sentiment: row.sentiment,
+      starred: row.starred,
+    }));
+  }
+
+  listFirstSeen(): { username: string; firstAt: string }[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT author_username AS username, MIN(created_at) AS firstAt
+           FROM mentions
+           WHERE hidden = 0 AND ${HEARD}
+           GROUP BY lower(author_username)`,
+        )
+        .all() as { username: string; firstAt: string }[]
+    );
+  }
+
+  countNew(): number {
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS count FROM mentions WHERE hidden = 0 AND queue = 'new' AND ${HEARD}`)
+      .get() as { count: number };
+    return row.count;
   }
 
   toggleMention(topicId: string, mentionId: string, field: "starred" | "hidden"): boolean {
@@ -285,7 +388,7 @@ export class Store {
          JOIN alerts a ON a.id = h.alert_id
          JOIN mentions m ON m.id = h.mention_id AND m.topic_id = h.topic_id
          JOIN topics t ON t.id = h.topic_id
-         WHERE h.seen = 0
+         WHERE h.seen = 0 AND ${HEARD_M}
          ORDER BY h.created_at DESC
          LIMIT ?`,
       )
@@ -302,7 +405,7 @@ export class Store {
         `SELECT author_name, author_username, COUNT(*) AS posts,
                 COALESCE(SUM(like_count + repost_count + reply_count + quote_count), 0) AS engagement
          FROM mentions
-         WHERE hidden = 0 AND created_at >= ?
+         WHERE hidden = 0 AND ${HEARD} AND created_at >= ?
          GROUP BY author_username
          ORDER BY posts DESC, engagement DESC
          LIMIT ?`,
@@ -321,7 +424,7 @@ export class Store {
            SUM(CASE WHEN sentiment = 'negative' THEN 1 ELSE 0 END) AS negative,
            SUM(CASE WHEN sentiment = 'neutral' THEN 1 ELSE 0 END) AS neutral
          FROM mentions
-         WHERE hidden = 0 AND created_at >= ?`,
+         WHERE hidden = 0 AND ${HEARD} AND created_at >= ?`,
       )
       .get(sinceIso) as {
       mentions: number;
@@ -346,7 +449,7 @@ export class Store {
       .prepare(
         `SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS count
          FROM mentions
-         WHERE hidden = 0 AND created_at >= datetime('now', ?)
+         WHERE hidden = 0 AND ${HEARD} AND created_at >= datetime('now', ?)
          GROUP BY day
          ORDER BY day ASC`,
       )
@@ -444,7 +547,7 @@ export class Store {
   private scanAlert(alertId: string, at: string): number {
     const rule = this.listAlerts().find((item) => item.id === alertId);
     if (!rule) return 0;
-    const mentions = this.db.prepare("SELECT * FROM mentions WHERE hidden = 0").all() as Mention[];
+    const mentions = this.db.prepare(`SELECT * FROM mentions WHERE hidden = 0 AND ${HEARD}`).all() as Mention[];
     let hits = 0;
     for (const mention of mentions) {
       const reason = alertReason(rule, {
@@ -469,6 +572,13 @@ export class Store {
       .run(randomUUID(), alertId, mentionId, topicId, reason, at);
     return result.changes > 0;
   }
+}
+
+function mentionFilter(view: MentionView): string {
+  if (view === "hidden") return "m.hidden = 1";
+  if (view === "starred") return "m.starred = 1 AND m.hidden = 0";
+  if (view === "new" || view === "reading" || view === "done") return `m.hidden = 0 AND m.queue = '${view}'`;
+  return "m.hidden = 0";
 }
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string): void {
