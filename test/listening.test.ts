@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { alertReason } from "../src/alerts.js";
 import { createApp } from "../src/app.js";
 import { issueSession, sessionValid } from "../src/auth.js";
 import type { AppConfig } from "../src/config.js";
@@ -101,6 +102,63 @@ test("lượt nghe ghi bài công khai và nhớ mốc since_id", async () => {
   assert.equal(store.listMentions()[0]?.sentiment, "negative");
   assert.equal(store.getTopic("t1")?.since_id, "99");
   store.close();
+});
+
+test("chuông khớp bài đang có, bài mới, và giấu tin khỏi dây", () => {
+  const store = Store.open(":memory:");
+  store.insertTopic({
+    id: "t1",
+    name: "Quán",
+    query: "cà phê",
+    excludeReposts: true,
+    createdAt: "2026-10-14T00:00:00.000Z",
+  });
+  const base = {
+    topicId: "t1",
+    authorUsername: "lan",
+    authorName: "Lan",
+    createdAt: "2026-10-14T08:00:00.000Z",
+    lang: "vi",
+    likeCount: 3,
+    repostCount: 0,
+    replyCount: 0,
+    quoteCount: 0,
+  };
+  store.insertMention({ ...base, id: "1", text: "Phục vụ thất vọng" }, "2026-10-14T08:01:00.000Z");
+  store.insertMention({ ...base, id: "2", text: "Nước ổn" }, "2026-10-14T08:02:00.000Z");
+  const found = store.insertAlert({
+    id: "bell-1",
+    topicId: null,
+    name: "Kêu ca",
+    kind: "negative",
+    phrase: "",
+    minLikes: 0,
+    createdAt: "2026-10-14T08:03:00.000Z",
+  });
+  assert.equal(found, 1);
+  store.insertMention({ ...base, id: "3", text: "Lại chậm nữa" }, "2026-10-14T08:04:00.000Z");
+  assert.equal(store.listOpenHits().length, 2);
+  assert.equal(store.toggleMention("t1", "2", "starred"), true);
+  assert.equal(store.listMentions(undefined, 80, "starred").length, 1);
+  assert.equal(store.toggleMention("t1", "1", "hidden"), true);
+  assert.equal(store.listMentions().some((row) => row.id === "1"), false);
+  assert.equal(store.stats("2026-10-14T00:00:00.000Z").mentions, 2);
+  store.close();
+});
+
+test("chuông cụm từ chỉ kêu đúng tần số", () => {
+  const rule = {
+    id: "a",
+    topic_id: "t1",
+    name: "Giấy",
+    kind: "phrase" as const,
+    phrase: "Cà Phê",
+    min_likes: 0,
+    active: 1,
+    created_at: "2026-10-14T00:00:00.000Z",
+  };
+  assert.match(alertReason(rule, { topicId: "t1", text: "cà phê giấy", sentiment: "neutral", likeCount: 0 }) ?? "", /Cà Phê/);
+  assert.equal(alertReason(rule, { topicId: "t2", text: "cà phê giấy", sentiment: "neutral", likeCount: 0 }), null);
 });
 
 test("khách chưa đăng nhập không vào bàn nghe", async () => {

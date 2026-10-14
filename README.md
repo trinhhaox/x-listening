@@ -29,6 +29,10 @@ Mỗi lượt chỉ lấy một trang (mặc định 20 bài) cho mỗi tần s�
 
 Sắc thái “nghiêng tốt / nghiêng xấu” là đếm từ vựng tiếng Việt và tiếng Anh, có xét “không” đứng ngay trước. Đây không phải mô hình cảm xúc.
 
+Trên mỗi bài có thể **ghim**, **giấu**, hoặc viết ghi chú nội bộ. Dây tin có ba ngăn: đang xem, đã ghim, đã giấu. Bài đã giấu không tính vào số liệu.
+
+**Chuông** kêu khi bài mới (và bài đang lưu lúc đặt chuông) nghiêng xấu, chứa một cụm từ, hoặc đủ số lượt thích. Chuông có thể áp cho một tần số hoặc mọi tần số. Bấm **Đã xem** để tắt một hồi chuông.
+
 ## Kiểm tra
 
 ```bash

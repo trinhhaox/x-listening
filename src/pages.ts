@@ -1,4 +1,4 @@
-import type { MentionRow, Topic } from "./db.js";
+import type { AlertHitRow, AlertRule, MentionRow, MentionView, Topic, Voice } from "./db.js";
 
 export function escapeHtml(value: string): string {
   return value
@@ -13,10 +13,14 @@ type DashboardModel = {
   topics: Topic[];
   mentions: MentionRow[];
   activeTopic: string;
+  view: MentionView;
   hasToken: boolean;
   notice: string;
   stats: { mentions: number; authors: number; engagement: number; positive: number; negative: number; neutral: number };
   days: { day: string; count: number }[];
+  alerts: AlertRule[];
+  hits: AlertHitRow[];
+  voices: Voice[];
 };
 
 export function loginPage(error = ""): string {
@@ -64,12 +68,15 @@ export function dashboardPage(model: DashboardModel): string {
     })
     .join("");
 
+  const backFields = `<input type="hidden" name="topic" value="${escapeHtml(model.activeTopic)}" /><input type="hidden" name="view" value="${escapeHtml(model.view)}" />`;
   const rows = model.mentions
     .map((mention, index) => {
       const username = mention.author_username;
       const href = `https://x.com/${encodeURIComponent(username)}/status/${encodeURIComponent(mention.id)}`;
+      const action = `/mentions/${encodeURIComponent(mention.topic_id)}/${encodeURIComponent(mention.id)}`;
       const sample = mention.sample ? `<em class="stamp">Mẫu</em>` : "";
-      return `<article style="animation-delay:${index * 40}ms">
+      const note = mention.note ? `<p class="note">${escapeHtml(mention.note)}</p>` : "";
+      return `<article class="${mention.starred ? "starred" : ""}" style="animation-delay:${index * 40}ms">
         <header>
           <div>
             <b>${escapeHtml(mention.author_name)}</b>
@@ -78,6 +85,7 @@ export function dashboardPage(model: DashboardModel): string {
           <time>${escapeHtml(formatWhen(mention.created_at))}</time>
         </header>
         <p>${escapeHtml(mention.text)}</p>
+        ${note}
         <footer>
           <span class="feel ${escapeHtml(mention.sentiment)}">${labelSentiment(mention.sentiment)}</span>
           <span>${escapeHtml(mention.topic_name)}</span>
@@ -85,9 +93,50 @@ export function dashboardPage(model: DashboardModel): string {
           <span class="counts">${mention.like_count} thích · ${mention.reply_count} trả lời · ${mention.repost_count} đăng lại</span>
           ${mention.sample ? "" : `<a href="${href}" target="_blank" rel="noreferrer">Mở trên X</a>`}
         </footer>
+        <div class="actions">
+          <form method="post" action="${action}/star">${backFields}<button class="quiet" type="submit">${mention.starred ? "Bỏ ghim" : "Ghim"}</button></form>
+          <form method="post" action="${action}/hide">${backFields}<button class="quiet" type="submit">${mention.hidden ? "Hiện lại" : "Giấu"}</button></form>
+          <form class="note-form" method="post" action="${action}/note">${backFields}<input name="note" maxlength="280" value="${escapeHtml(mention.note)}" placeholder="Ghi chú nội bộ" /><button class="quiet" type="submit">Lưu chú</button></form>
+        </div>
       </article>`;
     })
     .join("");
+
+  const alertTopics = model.topics
+    .map((topic) => `<option value="${escapeHtml(topic.id)}">${escapeHtml(topic.name)}</option>`)
+    .join("");
+  const hits = model.hits
+    .map(
+      (hit) => `<li>
+        <div>
+          <strong>${escapeHtml(hit.alert_name)}</strong>
+          <span>${escapeHtml(hit.reason)} · ${escapeHtml(hit.author_name)} · ${escapeHtml(hit.topic_name)}</span>
+          <p>${escapeHtml(hit.text)}</p>
+        </div>
+        <form method="post" action="/alerts/hits/${escapeHtml(hit.id)}/seen">${backFields}<button class="quiet" type="submit">Đã xem</button></form>
+      </li>`,
+    )
+    .join("");
+  const rules = model.alerts
+    .map((rule) => {
+      const detail = rule.kind === "phrase" ? rule.phrase : rule.kind === "likes" ? `${rule.min_likes} thích` : "nghiêng xấu";
+      return `<li class="pair"><div><strong>${escapeHtml(rule.name)}</strong><span>${escapeHtml(detail)}</span></div>
+        <form method="post" action="/alerts/${escapeHtml(rule.id)}/delete">${backFields}<button class="quiet" type="submit">Gỡ</button></form></li>`;
+    })
+    .join("");
+  const voices = model.voices
+    .map(
+      (voice) =>
+        `<span><b>${escapeHtml(voice.author_name)}</b> @${escapeHtml(voice.author_username)} · ${voice.posts} bài</span>`,
+    )
+    .join("");
+  const viewLink = (view: MentionView, label: string) => {
+    const params = new URLSearchParams();
+    if (model.activeTopic) params.set("topic", model.activeTopic);
+    if (view !== "wire") params.set("view", view);
+    const query = params.toString();
+    return `<a class="${model.view === view ? "on" : ""}" href="/${query ? `?${query}` : ""}">${label}</a>`;
+  };
 
   const bars = model.days
     .map(
@@ -119,6 +168,8 @@ export function dashboardPage(model: DashboardModel): string {
       </div>
     </section>
     <section class="days">${bars || `<p class="empty">Chưa đủ ngày để vẽ cột.</p>`}</section>
+    <section class="voices"><h2>Người viết nhiều, 7 ngày</h2>${voices || `<p class="empty">Chưa có người viết.</p>`}</section>
+    ${hits ? `<section class="hits"><h2>Chuông đang kêu</h2><ul>${hits}</ul></section>` : ""}
     <div class="split">
       <aside>
         <h2>Tần số</h2>
@@ -129,19 +180,35 @@ export function dashboardPage(model: DashboardModel): string {
           <button type="submit">Thêm tần số</button>
         </form>
         <ul class="topics">${topicList || `<li class="off"><div><strong>Chưa có tần số</strong><span>Thêm một câu tìm kiếm để bắt đầu nghe.</span></div></li>`}</ul>
+        <h2>Chuông</h2>
+        <form class="add" method="post" action="/alerts">
+          <label>Tên<input name="name" required maxlength="80" placeholder="Bài kêu ca" /></label>
+          <label>Khi nào<select name="kind">
+            <option value="negative">Bài nghiêng xấu</option>
+            <option value="phrase">Có cụm từ</option>
+            <option value="likes">Đủ lượt thích</option>
+          </select></label>
+          <label>Cụm từ<input name="phrase" maxlength="80" placeholder="thất vọng" /></label>
+          <label>Số thích tối thiểu<input name="min_likes" type="number" min="1" max="1000000" value="20" /></label>
+          <label>Áp vào<select name="topic_id"><option value="">Mọi tần số</option>${alertTopics}</select></label>
+          <button type="submit">Đặt chuông</button>
+        </form>
+        <ul class="topics">${rules}</ul>
         <form method="post" action="/samples"><button class="quiet" type="submit">Nạp tin mẫu</button></form>
         <form method="post" action="/samples/clear"><button class="quiet" type="submit">Xóa tin mẫu</button></form>
       </aside>
       <section class="wire">
         <div class="wire-head">
           <h2>Dây tin</h2>
+          <nav class="views">${viewLink("wire", "Đang xem")}${viewLink("starred", "Đã ghim")}${viewLink("hidden", "Đã giấu")}</nav>
           <form method="get" action="/">
+            <input type="hidden" name="view" value="${escapeHtml(model.view === "wire" ? "" : model.view)}" />
             <select name="topic" onchange="this.form.submit()">
               <option value="">Mọi tần số</option>
               ${topicOptions}
             </select>
           </form>
-          <a href="/export.csv">Tải CSV</a>
+          <a href="/export.csv${model.activeTopic ? `?topic=${encodeURIComponent(model.activeTopic)}` : ""}">Tải CSV</a>
         </div>
         ${rows || `<p class="empty">Chưa có tin. Thêm tần số, rồi bấm Lắng nghe ngay. Tin mẫu có dấu Mẫu và không phải bài thật.</p>`}
       </section>
@@ -261,6 +328,21 @@ function layout(title: string, body: string): string {
     .topics span, .topics code { display: block; color: var(--muted); font-size: 0.86rem; }
     .topics code { font-family: "IBM Plex Mono", ui-monospace, monospace; white-space: pre-wrap; margin-top: 4px; }
     .topics li.off strong { color: var(--muted); }
+    .topics li.pair { grid-template-columns: 1fr auto; }
+    .voices { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; margin: 0 0 22px; }
+    .voices h2 { width: 100%; }
+    .voices span { color: var(--muted); }
+    .hits ul, .hits { list-style: none; padding: 0; margin: 0 0 18px; }
+    .hits li { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: start; padding: 12px 0; border-top: 1px solid var(--line); }
+    .hits span, .hits p { color: var(--muted); margin: 4px 0 0; }
+    .views { display: flex; gap: 8px; flex-wrap: wrap; }
+    .views a { border: 1px solid var(--line); border-radius: 999px; padding: 8px 12px; text-decoration: none; color: var(--ink); }
+    .views a.on { background: var(--ink); color: #f6efe4; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .note-form { display: flex; gap: 8px; flex: 1; min-width: min(100%, 280px); }
+    .note-form input { margin: 0; }
+    article .note { color: var(--clay); margin: 0; }
+    article.starred { border-left: 3px solid var(--copper); padding-left: 12px; }
     article { padding: 16px 0; border-top: 1px solid var(--line); animation: rise 0.45s ease both; }
     @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
     article header, article footer { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 0.9rem; }

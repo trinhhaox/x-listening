@@ -1,6 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { alertReason, type AlertKind, type AlertRule } from "./alerts.js";
+
+export type { AlertRule };
 import { classifySentiment } from "./sentiment.js";
 
 export type Topic = {
@@ -31,6 +35,31 @@ export type Mention = {
   sentiment_score: number;
   sample: number;
   fetched_at: string;
+  starred: number;
+  hidden: number;
+  note: string;
+};
+
+export type MentionView = "wire" | "starred" | "hidden";
+
+export type AlertHitRow = {
+  id: string;
+  alert_id: string;
+  alert_name: string;
+  reason: string;
+  mention_id: string;
+  topic_id: string;
+  topic_name: string;
+  author_name: string;
+  text: string;
+  created_at: string;
+};
+
+export type Voice = {
+  author_name: string;
+  author_username: string;
+  posts: number;
+  engagement: number;
 };
 
 export type MentionRow = Mention & { topic_name: string };
@@ -89,7 +118,30 @@ export class Store {
         PRIMARY KEY (id, topic_id)
       );
       CREATE INDEX IF NOT EXISTS mentions_created ON mentions(created_at DESC);
+      CREATE TABLE IF NOT EXISTS alerts (
+        id TEXT PRIMARY KEY,
+        topic_id TEXT REFERENCES topics(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        phrase TEXT NOT NULL DEFAULT '',
+        min_likes INTEGER NOT NULL DEFAULT 0,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS alert_hits (
+        id TEXT PRIMARY KEY,
+        alert_id TEXT NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
+        mention_id TEXT NOT NULL,
+        topic_id TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        seen INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (alert_id, mention_id, topic_id)
+      );
     `);
+    ensureColumn(db, "mentions", "starred", "starred INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(db, "mentions", "hidden", "hidden INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(db, "mentions", "note", "note TEXT NOT NULL DEFAULT ''");
     return new Store(db);
   }
 
@@ -130,6 +182,9 @@ export class Store {
 
   insertMention(mention: NewMention, fetchedAt: string): boolean {
     const feeling = classifySentiment(mention.text);
+    const existed = Boolean(
+      this.db.prepare("SELECT 1 AS ok FROM mentions WHERE id = ? AND topic_id = ?").get(mention.id, mention.topicId),
+    );
     const result = this.db
       .prepare(
         `INSERT INTO mentions (
@@ -163,29 +218,96 @@ export class Store {
         mention.sample ? 1 : 0,
         fetchedAt,
       );
+    if (!existed) this.recordHits(mention, feeling.sentiment, fetchedAt);
     return result.changes > 0;
   }
 
-  listMentions(topicId?: string, limit = 80): MentionRow[] {
-    if (topicId) {
-      return this.db
-        .prepare(
-          `SELECT m.*, t.name AS topic_name
-           FROM mentions m JOIN topics t ON t.id = m.topic_id
-           WHERE m.topic_id = ?
-           ORDER BY m.created_at DESC
-           LIMIT ?`,
-        )
-        .all(topicId, limit) as MentionRow[];
-    }
+  listMentions(topicId?: string, limit = 80, view: MentionView = "wire"): MentionRow[] {
+    const visibility =
+      view === "hidden" ? "m.hidden = 1" : view === "starred" ? "m.starred = 1 AND m.hidden = 0" : "m.hidden = 0";
     return this.db
       .prepare(
         `SELECT m.*, t.name AS topic_name
          FROM mentions m JOIN topics t ON t.id = m.topic_id
+         WHERE (? = '' OR m.topic_id = ?) AND ${visibility}
          ORDER BY m.created_at DESC
          LIMIT ?`,
       )
-      .all(limit) as MentionRow[];
+      .all(topicId ?? "", topicId ?? "", limit) as MentionRow[];
+  }
+
+  toggleMention(topicId: string, mentionId: string, field: "starred" | "hidden"): boolean {
+    const result = this.db
+      .prepare(`UPDATE mentions SET ${field} = CASE WHEN ${field} = 1 THEN 0 ELSE 1 END WHERE topic_id = ? AND id = ?`)
+      .run(topicId, mentionId);
+    return result.changes > 0;
+  }
+
+  setMentionNote(topicId: string, mentionId: string, note: string): boolean {
+    const result = this.db
+      .prepare("UPDATE mentions SET note = ? WHERE topic_id = ? AND id = ?")
+      .run(note.slice(0, 280), topicId, mentionId);
+    return result.changes > 0;
+  }
+
+  listAlerts(): AlertRule[] {
+    return this.db.prepare("SELECT * FROM alerts ORDER BY created_at ASC").all() as AlertRule[];
+  }
+
+  insertAlert(input: {
+    id: string;
+    topicId: string | null;
+    name: string;
+    kind: AlertKind;
+    phrase: string;
+    minLikes: number;
+    createdAt: string;
+  }): number {
+    this.db
+      .prepare(
+        `INSERT INTO alerts (id, topic_id, name, kind, phrase, min_likes, active, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+      )
+      .run(input.id, input.topicId, input.name, input.kind, input.phrase, input.minLikes, input.createdAt);
+    return this.scanAlert(input.id, input.createdAt);
+  }
+
+  deleteAlert(id: string): void {
+    this.db.prepare("DELETE FROM alerts WHERE id = ?").run(id);
+  }
+
+  listOpenHits(limit = 20): AlertHitRow[] {
+    return this.db
+      .prepare(
+        `SELECT h.id, h.alert_id, a.name AS alert_name, h.reason, h.mention_id, h.topic_id,
+                t.name AS topic_name, m.author_name, m.text, h.created_at
+         FROM alert_hits h
+         JOIN alerts a ON a.id = h.alert_id
+         JOIN mentions m ON m.id = h.mention_id AND m.topic_id = h.topic_id
+         JOIN topics t ON t.id = h.topic_id
+         WHERE h.seen = 0
+         ORDER BY h.created_at DESC
+         LIMIT ?`,
+      )
+      .all(limit) as AlertHitRow[];
+  }
+
+  seeHit(id: string): void {
+    this.db.prepare("UPDATE alert_hits SET seen = 1 WHERE id = ?").run(id);
+  }
+
+  topVoices(sinceIso: string, limit = 5): Voice[] {
+    return this.db
+      .prepare(
+        `SELECT author_name, author_username, COUNT(*) AS posts,
+                COALESCE(SUM(like_count + repost_count + reply_count + quote_count), 0) AS engagement
+         FROM mentions
+         WHERE hidden = 0 AND created_at >= ?
+         GROUP BY author_username
+         ORDER BY posts DESC, engagement DESC
+         LIMIT ?`,
+      )
+      .all(sinceIso, limit) as Voice[];
   }
 
   stats(sinceIso: string): { mentions: number; authors: number; engagement: number; positive: number; negative: number; neutral: number } {
@@ -199,7 +321,7 @@ export class Store {
            SUM(CASE WHEN sentiment = 'negative' THEN 1 ELSE 0 END) AS negative,
            SUM(CASE WHEN sentiment = 'neutral' THEN 1 ELSE 0 END) AS neutral
          FROM mentions
-         WHERE created_at >= ?`,
+         WHERE hidden = 0 AND created_at >= ?`,
       )
       .get(sinceIso) as {
       mentions: number;
@@ -224,7 +346,7 @@ export class Store {
       .prepare(
         `SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS count
          FROM mentions
-         WHERE created_at >= datetime('now', ?)
+         WHERE hidden = 0 AND created_at >= datetime('now', ?)
          GROUP BY day
          ORDER BY day ASC`,
       )
@@ -300,8 +422,58 @@ export class Store {
   }
 
   clearSamples(): number {
+    this.db.prepare("DELETE FROM alert_hits WHERE mention_id IN (SELECT id FROM mentions WHERE sample = 1)").run();
     const result = this.db.prepare("DELETE FROM mentions WHERE sample = 1").run();
     this.db.prepare("DELETE FROM topics WHERE id = 'sample-topic'").run();
     return Number(result.changes);
+  }
+
+  private recordHits(mention: NewMention, sentiment: string, at: string): void {
+    for (const rule of this.listAlerts()) {
+      const reason = alertReason(rule, {
+        topicId: mention.topicId,
+        text: mention.text,
+        sentiment,
+        likeCount: mention.likeCount,
+      });
+      if (!reason) continue;
+      this.insertHit(rule.id, mention.id, mention.topicId, reason, at);
+    }
+  }
+
+  private scanAlert(alertId: string, at: string): number {
+    const rule = this.listAlerts().find((item) => item.id === alertId);
+    if (!rule) return 0;
+    const mentions = this.db.prepare("SELECT * FROM mentions WHERE hidden = 0").all() as Mention[];
+    let hits = 0;
+    for (const mention of mentions) {
+      const reason = alertReason(rule, {
+        topicId: mention.topic_id,
+        text: mention.text,
+        sentiment: mention.sentiment,
+        likeCount: mention.like_count,
+      });
+      if (!reason) continue;
+      if (this.insertHit(rule.id, mention.id, mention.topic_id, reason, at)) hits += 1;
+    }
+    return hits;
+  }
+
+  private insertHit(alertId: string, mentionId: string, topicId: string, reason: string, at: string): boolean {
+    const result = this.db
+      .prepare(
+        `INSERT INTO alert_hits (id, alert_id, mention_id, topic_id, reason, created_at, seen)
+         VALUES (?, ?, ?, ?, ?, ?, 0)
+         ON CONFLICT(alert_id, mention_id, topic_id) DO NOTHING`,
+      )
+      .run(randomUUID(), alertId, mentionId, topicId, reason, at);
+    return result.changes > 0;
+  }
+}
+
+function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!columns.some((item) => item.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
   }
 }
