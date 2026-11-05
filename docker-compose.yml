@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_PATH: /app/data/listening.db
+      PORT: "3021"
+      HOST: "0.0.0.0"
+    ports:
+      - "127.0.0.1:3028:3021"
+    volumes:
+      - listening-data:/app/data
+
+volumes:
+  listening-data:
