@@ -23,6 +23,7 @@ type DashboardModel = {
   assignedToFilter?: string;
   tagFilter?: string;
   hasToken: boolean;
+  xNotice?: string;
   hasFacebook: boolean;
   hasThreads: boolean;
   hasYoutube: boolean;
@@ -297,7 +298,7 @@ export function dashboardPage(model: DashboardModel): string {
 
     ${model.notice ? `<div class="deck-alert info">ℹ️ ${escapeHtml(model.notice)}</div>` : ""}
     ${model.spike ? `<div class="deck-alert warning">⚡ <strong>Đột biến phát hiện:</strong> ${escapeHtml(model.spike)}</div>` : ""}
-    ${model.hasToken ? "" : `<div class="deck-alert warning">⚠️ Chưa có cấu hình X (auth_token & ct0). Vào mục <a href="/settings">Cài đặt</a> để thêm.</div>`}
+    ${model.xNotice ? `<div class="deck-alert warning">⚠️ ${model.xNotice}</div>` : ""}
     ${model.hasFacebook ? "" : `<div class="deck-alert warning">⚠️ Chưa có cấu hình Facebook Cookie. Vào mục <a href="/settings">Cài đặt</a> để thêm.</div>`}
 
     <!-- KHU VỰC 1: RADAR TÌNH BÁO & CẢNH BÁO KHỦNG HOẢNG (NỬA TRÊN) -->
@@ -962,9 +963,11 @@ export function settingsPage(config: AppConfig, notice?: string): string {
           </div>
           <label>Cookie auth_token
             <input type="password" name="TWITTER_AUTH_TOKEN" value="${escapeHtml(config.TWITTER_AUTH_TOKEN)}" placeholder="F12 -> Cookies -> auth_token" />
+            ${config.TWITTER_AUTH_TOKEN.trim() ? `<span style="display:block; margin-top:4px; color:var(--moss); font-size:0.76rem; font-weight:600;">✓ Đã lưu (${config.TWITTER_AUTH_TOKEN.trim().length} ký tự)</span>` : `<span style="display:block; margin-top:4px; color:var(--copper); font-size:0.76rem;">⚠️ Chưa có - Lấy từ F12 -> Cookies -> auth_token</span>`}
           </label>
           <label>Cookie ct0 (CSRF token)
             <input type="password" name="TWITTER_CT0" value="${escapeHtml(config.TWITTER_CT0)}" placeholder="F12 -> Cookies -> ct0" />
+            ${config.TWITTER_CT0.trim() ? `<span style="display:block; margin-top:4px; color:var(--moss); font-size:0.76rem; font-weight:600;">✓ Đã lưu (${config.TWITTER_CT0.trim().length} ký tự)</span>` : `<span style="display:block; margin-top:4px; color:var(--copper); font-size:0.76rem; font-weight:600;">⚠️ Chưa có - X bắt buộc cần cả ct0 để quét bài (F12 -> Cookies -> ct0)</span>`}
           </label>
           <label>Hoặc Bearer Token X API v2 (Nếu có)
             <input type="password" name="X_BEARER_TOKEN" value="${escapeHtml(config.X_BEARER_TOKEN)}" placeholder="Bearer token chính thức" />
@@ -981,6 +984,7 @@ export function settingsPage(config: AppConfig, notice?: string): string {
           </div>
           <label>Cookie Facebook (c_user & xs)
             <textarea name="FACEBOOK_COOKIE" rows="3" placeholder="c_user=...; xs=...;">${escapeHtml(config.FACEBOOK_COOKIE)}</textarea>
+            ${config.FACEBOOK_COOKIE.trim() ? `<span style="display:block; margin-top:4px; color:var(--moss); font-size:0.76rem; font-weight:600;">✓ Đã lưu (${config.FACEBOOK_COOKIE.trim().length} ký tự)</span>` : `<span style="display:block; margin-top:4px; color:var(--copper); font-size:0.76rem;">Chưa có</span>`}
           </label>
           <label>Hoặc Page Access Token (Nếu có)
             <input type="password" name="FACEBOOK_ACCESS_TOKEN" value="${escapeHtml(config.FACEBOOK_ACCESS_TOKEN)}" placeholder="Token Graph API" />

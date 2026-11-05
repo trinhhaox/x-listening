@@ -172,6 +172,15 @@ export function createApp(config: AppConfig, store: Store) {
         tagFilter: tag,
         templates: store.listTemplates(),
         hasToken: Boolean(activeConfig.X_BEARER_TOKEN.trim() || (activeConfig.TWITTER_AUTH_TOKEN.trim() && activeConfig.TWITTER_CT0.trim())),
+        xNotice: (() => {
+          const hasBearer = Boolean(activeConfig.X_BEARER_TOKEN.trim());
+          const hasAuth = Boolean(activeConfig.TWITTER_AUTH_TOKEN.trim());
+          const hasCt0 = Boolean(activeConfig.TWITTER_CT0.trim());
+          if (hasBearer || (hasAuth && hasCt0)) return "";
+          if (hasAuth && !hasCt0) return 'Đã có Cookie auth_token nhưng còn thiếu ct0 (CSRF token) của X. X yêu cầu cả 2 để quét bài viết. Vào mục <a href="/settings">Cài đặt</a> để thêm.';
+          if (!hasAuth && hasCt0) return 'Đã có Cookie ct0 nhưng còn thiếu auth_token của X. Vào mục <a href="/settings">Cài đặt</a> để thêm.';
+          return 'Chưa có cấu hình X (auth_token & ct0). Vào mục <a href="/settings">Cài đặt</a> để thêm.';
+        })(),
         hasFacebook: Boolean(activeConfig.FACEBOOK_ACCESS_TOKEN.trim() || activeConfig.FACEBOOK_COOKIE.trim()),
         hasThreads: Boolean(activeConfig.THREADS_ACCESS_TOKEN.trim()),
         hasYoutube: Boolean(activeConfig.YOUTUBE_API_KEY.trim()),

@@ -23,9 +23,49 @@ async function callChatCompletions(
   if (!apiKey) throw new Error("Chưa cấu hình LLM_API_KEY");
 
   const baseUrl = (options.baseUrl?.trim() || "https://api.openai.com/v1").replace(/\/+$/, "");
-  const model = options.model?.trim() || "gpt-4o-mini";
-  const url = `${baseUrl}/chat/completions`;
+  const model = options.model?.trim() || (baseUrl.includes("anthropic.com") ? "claude-3-5-sonnet-20241022" : "gpt-4o-mini");
 
+  // Hỗ trợ tự động Anthropic Messages API gốc
+  if (baseUrl.includes("anthropic.com")) {
+    const sysMsg = messages.find((m) => m.role === "system")?.content;
+    const userMsgs = messages
+      .filter((m) => m.role === "user")
+      .map((m) => ({ role: "user", content: m.content }));
+
+    const anthropicPayload: Record<string, unknown> = {
+      model,
+      max_tokens: 1024,
+      messages: userMsgs,
+      temperature: 0.3,
+    };
+    if (sysMsg) {
+      anthropicPayload.system = sysMsg;
+    }
+
+    const response = await (options.fetchImpl ?? fetch)("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(anthropicPayload),
+      signal: AbortSignal.timeout(25_000),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      throw new Error(`Anthropic API trả về lỗi ${response.status}: ${errorText.slice(0, 160)}`);
+    }
+
+    const data = (await response.json()) as { content?: Array<{ type?: string; text?: string }> };
+    const text = data.content?.find((c) => c.type === "text")?.text?.trim() || data.content?.[0]?.text?.trim();
+    if (!text) throw new Error("Anthropic API không trả về nội dung");
+    return text;
+  }
+
+  // Chuẩn OpenAI-compatible mặc định
+  const url = `${baseUrl}/chat/completions`;
   const bodyPayload: Record<string, unknown> = {
     model,
     messages,
