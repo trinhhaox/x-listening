@@ -67,6 +67,7 @@ export function loginPage(error = ""): string {
         </div>
       </form>
     </div>`,
+    "login",
   );
 }
 
@@ -207,10 +208,10 @@ export function dashboardPage(model: DashboardModel): string {
             <button class="btn btn-sm btn-outline" type="submit">${topic.active ? "Tạm dừng" : "Bật quét"}</button>
           </form>
           <form method="post" action="/topics/${escapeHtml(topic.id)}/backfill">
-            <button class="btn btn-sm btn-outline" type="submit">Lấy tin 7 ngày</button>
+            <button class="btn btn-sm btn-outline" type="submit">Lấy 7 ngày</button>
           </form>
           <form method="post" action="/topics/${escapeHtml(topic.id)}/delete" onsubmit="return confirm('Xóa nguồn theo dõi này và toàn bộ tin tức liên quan?')">
-            <button class="btn btn-sm btn-danger-flat" type="submit">Xóa nguồn</button>
+            <button class="btn btn-sm btn-danger-flat" type="submit">Xóa</button>
           </form>
         </div>
       </div>`;
@@ -279,35 +280,19 @@ export function dashboardPage(model: DashboardModel): string {
   return layout(
     "Tổng quan & Tin tức",
     `
-    <!-- TOP HEADER / HEROUI NAVBAR -->
-    <header class="deck-top-bar">
-      <div class="deck-top-left">
-        <div class="brand-row">
-          <span class="live-dot"><i class="heroui-pulse"></i></span>
-          <span class="brand-title">xListening</span>
-          <span class="heroui-chip heroui-chip-primary">Giám sát & Cảnh báo Dư luận</span>
+    <!-- PAGE HERO HEADER (NẰM DƯỚI NAVBAR, KHÔNG BỊ ĐÈ) -->
+    <div class="deck-page-header">
+      <div class="page-header-title">
+        <div class="title-with-badge">
+          <h1>📊 Tổng quan & Dây tin Dư luận</h1>
+          <span class="heroui-chip heroui-chip-primary">Giám sát Đa nền tảng</span>
         </div>
-        <p class="brand-desc">Hệ thống theo dõi thời gian thực trên Facebook, X, Threads, YouTube & Báo chí</p>
+        <p class="text-muted">Theo dõi và phân tích cảm xúc thời gian thực trên Facebook, X, Threads, YouTube & Báo chí</p>
       </div>
-      <div class="deck-top-right">
-        <nav class="deck-nav">
-          <a class="nav-btn active" href="/">📊 Tổng quan & Tin tức</a>
-          <a class="nav-btn" href="javascript:void(0)" onclick="const p=document.getElementById('deck-admin-panel'); if(p){ p.open=true; p.scrollIntoView({behavior:'smooth'}); }">⚙️ Nguồn theo dõi & Cảnh báo</a>
-          <a class="nav-btn" href="/brief">📑 Báo cáo AI hàng ngày</a>
-          <a class="nav-btn" href="/hashtags">🔥 Xu hướng & Từ khóa</a>
-          <a class="nav-btn" href="/compare">⚖️ So sánh nguồn tin</a>
-          <a class="nav-btn" href="/settings">🔌 Cấu hình kết nối</a>
-        </nav>
-        <div class="top-actions">
-          <form method="post" action="/listen">
-            <button class="btn btn-primary" type="submit">🔄 Quét tin mới ngay</button>
-          </form>
-          <form method="post" action="/logout">
-            <button class="btn btn-outline" type="submit">Đăng xuất</button>
-          </form>
-        </div>
+      <div class="page-header-actions">
+        <button class="btn btn-outline" type="button" onclick="const p=document.getElementById('deck-admin-panel'); if(p){ p.open=!p.open; if(p.open) p.scrollIntoView({behavior:'smooth'}); }">⚙️ Nguồn theo dõi & Cảnh báo (${model.topics.length})</button>
       </div>
-    </header>
+    </div>
 
     ${model.notice ? `<div class="deck-alert info">ℹ️ ${escapeHtml(model.notice)}</div>` : ""}
     ${model.spike ? `<div class="deck-alert warning">⚡ <strong>Đột biến phát hiện:</strong> ${escapeHtml(model.spike)}</div>` : ""}
@@ -517,6 +502,7 @@ export function dashboardPage(model: DashboardModel): string {
       </div>
     </section>
     `,
+    "dashboard",
   );
 }
 
@@ -530,7 +516,7 @@ function renderAdminPanel(
   backFields: string,
 ): string {
   return `
-    <!-- BẢNG ĐIỀU KHIỂN & CẤU HÌNH NGUỒN THEO DÕI / CẢNH BÁO (HEROUI ACCORDION) -->
+    <!-- BẢNG ĐIỀU KHIỂN & CẤU HÌNH NGUỒN THEO DÕI / CẢNH BÁO (HEROUI ACCORDION 2 CỘT RỘNG RÃI) -->
     <details id="deck-admin-panel" class="deck-admin-details heroui-card" ${model.adminOpen ? "open" : ""}>
       <summary class="deck-admin-summary">
         <div class="admin-summary-content">
@@ -899,29 +885,19 @@ export function briefPage(brief: Brief, notice?: string): string {
   return layout(
     "Báo cáo AI hàng ngày",
     `
-    <header class="deck-top-bar">
-      <div class="deck-top-left">
-        <div class="brand-row">
-          <span class="live-dot"><i class="heroui-pulse"></i></span>
-          <span class="brand-title">xListening</span>
+    <div class="deck-page-header">
+      <div class="page-header-title">
+        <div class="title-with-badge">
+          <h1>📑 Báo cáo Tổng hợp Truyền thông Ngày ${escapeHtml(brief.day.split("-").reverse().join("/"))}</h1>
           <span class="heroui-chip heroui-chip-primary">Báo cáo Tổng hợp AI</span>
         </div>
-        <p class="brand-desc">Báo cáo tổng hợp tình hình truyền thông ngày ${escapeHtml(brief.day.split("-").reverse().join("/"))}</p>
+        <p class="text-muted">Đánh giá rủi ro, phân loại ý kiến tiêu cực và đề xuất hành động từ trợ lý AI</p>
       </div>
-      <div class="deck-top-right">
-        <nav class="deck-nav">
-          <a class="nav-btn" href="/">📊 Tổng quan & Tin tức</a>
-          <a class="nav-btn active" href="/brief">📑 Báo cáo AI hàng ngày</a>
-          <a class="nav-btn" href="/hashtags">🔥 Xu hướng & Từ khóa</a>
-          <a class="nav-btn" href="/compare">⚖️ So sánh nguồn tin</a>
-          <a class="nav-btn" href="/settings">🔌 Cấu hình kết nối</a>
-        </nav>
-        <div class="top-actions">
-          <a class="btn btn-outline" href="/brief.md">📥 Tải file Markdown (.md)</a>
-          <form method="post" action="/brief/send-webhook"><button class="btn btn-primary" type="submit">🚀 Gửi báo cáo qua Webhook</button></form>
-        </div>
+      <div class="page-header-actions">
+        <a class="btn btn-outline" href="/brief.md">📥 Tải file Markdown (.md)</a>
+        <form method="post" action="/brief/send-webhook" style="display:inline-block;"><button class="btn btn-primary" type="submit">🚀 Gửi qua Webhook</button></form>
       </div>
-    </header>
+    </div>
 
     ${notice ? `<div class="deck-alert info">${escapeHtml(notice)}</div>` : ""}
 
@@ -980,6 +956,7 @@ export function briefPage(brief: Brief, notice?: string): string {
       </div>
     </section>
     `,
+    "brief",
   );
 }
 
@@ -1011,25 +988,15 @@ export function comparePage(model: { topics: Topic[]; left: string; right: strin
   return layout(
     "So sánh nguồn tin",
     `
-    <header class="deck-top-bar">
-      <div class="deck-top-left">
-        <div class="brand-row">
-          <span class="live-dot"><i class="heroui-pulse"></i></span>
-          <span class="brand-title">xListening</span>
+    <div class="deck-page-header">
+      <div class="page-header-title">
+        <div class="title-with-badge">
+          <h1>⚖️ So sánh Đối chuẩn giữa 2 Nguồn theo dõi</h1>
           <span class="heroui-chip heroui-chip-primary">So sánh Đối chuẩn</span>
         </div>
-        <p class="brand-desc">So sánh biến động thảo luận 7 ngày giữa hai nguồn theo dõi</p>
+        <p class="text-muted">So sánh khối lượng và xu hướng thảo luận trong 7 ngày qua</p>
       </div>
-      <div class="deck-top-right">
-        <nav class="deck-nav">
-          <a class="nav-btn" href="/">📊 Tổng quan & Tin tức</a>
-          <a class="nav-btn" href="/brief">📑 Báo cáo AI hàng ngày</a>
-          <a class="nav-btn" href="/hashtags">🔥 Xu hướng & Từ khóa</a>
-          <a class="nav-btn active" href="/compare">⚖️ So sánh nguồn tin</a>
-          <a class="nav-btn" href="/settings">🔌 Cấu hình kết nối</a>
-        </nav>
-      </div>
-    </header>
+    </div>
 
     <div class="admin-card heroui-card" style="margin-bottom: 24px;">
       <form class="compare-select-form" method="get" action="/compare">
@@ -1053,6 +1020,7 @@ export function comparePage(model: { topics: Topic[]; left: string; right: strin
       </div>
     </div>
     `,
+    "compare",
   );
 }
 
@@ -1131,33 +1099,18 @@ export function hashtagsPage(model: HashtagsPageModel): string {
   return layout(
     "Xu hướng & Từ khóa nóng",
     `
-    <header class="deck-top-bar">
-      <div class="deck-top-left">
-        <div class="brand-row">
-          <span class="live-dot"><i class="heroui-pulse"></i></span>
-          <span class="brand-title">xListening</span>
+    <div class="deck-page-header">
+      <div class="page-header-title">
+        <div class="title-with-badge">
+          <h1>🔥 Phân tích Xu hướng, Từ khóa & Hashtags</h1>
           <span class="heroui-chip heroui-chip-primary">Xu hướng & Từ khóa Dư luận</span>
         </div>
-        <p class="brand-desc">Đo lường, phát hiện sớm rủi ro và xu hướng theo Từ khóa & Hashtags đa nền tảng</p>
+        <p class="text-muted">Đo lường, phát hiện sớm rủi ro và xu hướng theo Từ khóa & Hashtags đa nền tảng</p>
       </div>
-      <div class="deck-top-right">
-        <nav class="deck-nav">
-          <a class="nav-btn" href="/">📊 Tổng quan & Tin tức</a>
-          <a class="nav-btn" href="/brief">📑 Báo cáo AI hàng ngày</a>
-          <a class="nav-btn active" href="/hashtags">🔥 Xu hướng & Từ khóa</a>
-          <a class="nav-btn" href="/compare">⚖️ So sánh nguồn tin</a>
-          <a class="nav-btn" href="/settings">🔌 Cấu hình kết nối</a>
-        </nav>
-        <div class="top-actions">
-          <form method="post" action="/listen">
-            <button class="btn btn-primary" type="submit">🔄 Quét tin mới ngay</button>
-          </form>
-          <form method="post" action="/logout">
-            <button class="btn btn-outline" type="submit">Đăng xuất</button>
-          </form>
-        </div>
+      <div class="page-header-actions">
+        <a class="btn btn-outline" href="/">← Quay lại Tổng quan</a>
       </div>
-    </header>
+    </div>
 
     ${notice ? `<div class="deck-alert info">ℹ️ ${escapeHtml(notice)}</div>` : ""}
 
@@ -1182,9 +1135,6 @@ export function hashtagsPage(model: HashtagsPageModel): string {
               ${topicOptions}
             </select>
           </label>
-        </div>
-        <div class="ribbon-export">
-          <a class="btn btn-sm btn-outline" href="/">← Quay lại Tổng quan</a>
         </div>
       </form>
     </section>
@@ -1233,6 +1183,7 @@ export function hashtagsPage(model: HashtagsPageModel): string {
       </div>
     </section>
     `,
+    "hashtags",
   );
 }
 
@@ -1240,26 +1191,18 @@ export function settingsPage(config: AppConfig, notice?: string): string {
   return layout(
     "Cài đặt Bàn nghe & Cấu hình",
     `
-    <header class="deck-top-bar">
-      <div class="deck-top-left">
-        <div class="brand-row">
-          <span class="live-dot"><i class="heroui-pulse"></i></span>
-          <span class="brand-title">xListening</span>
+    <div class="deck-page-header">
+      <div class="page-header-title">
+        <div class="title-with-badge">
+          <h1>🔌 Cài đặt Bàn nghe & Cấu hình Hệ thống</h1>
           <span class="heroui-chip heroui-chip-primary">Cấu hình Hệ thống</span>
         </div>
-        <p class="brand-desc">Cấu hình kết nối Mạng xã hội, Cookie phiên, Trí tuệ Nhân tạo AI và Nhận thông báo tự động</p>
+        <p class="text-muted">Cấu hình kết nối Mạng xã hội, Cookie phiên, Trí tuệ Nhân tạo AI và Nhận thông báo tự động</p>
       </div>
-      <div class="deck-top-right">
-        <nav class="deck-nav">
-          <a class="nav-btn" href="/">📊 Tổng quan & Tin tức</a>
-          <a class="nav-btn" href="/brief">📑 Báo cáo AI hàng ngày</a>
-          <a class="nav-btn" href="/hashtags">🔥 Xu hướng & Từ khóa</a>
-          <a class="nav-btn" href="/compare">⚖️ So sánh nguồn tin</a>
-          <a class="nav-btn active" href="/settings">🔌 Cấu hình kết nối</a>
-        </nav>
-        <form method="post" action="/logout"><button class="btn btn-outline" type="submit">Đăng xuất</button></form>
+      <div class="page-header-actions">
+        <a class="btn btn-outline" href="/">← Quay lại Tổng quan</a>
       </div>
-    </header>
+    </div>
 
     ${notice ? `<div class="deck-alert info">${escapeHtml(notice)}</div>` : ""}
 
@@ -1378,6 +1321,7 @@ export function settingsPage(config: AppConfig, notice?: string): string {
       </div>
     </form>
     `,
+    "settings",
   );
 }
 
@@ -1398,7 +1342,41 @@ function formatWhen(iso: string): string {
   }).format(date);
 }
 
-function layout(title: string, body: string): string {
+function renderNavbar(activeTab: string): string {
+  if (activeTab === "login") return "";
+  return `
+  <!-- HEROUI STICKY TOP NAVBAR (CỐ ĐỊNH, KHÔNG BAO GIỜ BỊ ĐÈ NỘI DUNG) -->
+  <header class="deck-top-navbar">
+    <div class="navbar-container">
+      <div class="navbar-brand">
+        <a href="/" class="brand-link">
+          <span class="live-dot"><i class="heroui-pulse"></i></span>
+          <span class="brand-title">xListening</span>
+        </a>
+        <span class="heroui-chip heroui-chip-primary brand-badge">Giám sát Dư luận</span>
+      </div>
+
+      <nav class="navbar-nav">
+        <a class="nav-item ${activeTab === "dashboard" ? "active" : ""}" href="/">📊 Tổng quan</a>
+        <a class="nav-item ${activeTab === "brief" ? "active" : ""}" href="/brief">📑 Báo cáo AI</a>
+        <a class="nav-item ${activeTab === "hashtags" ? "active" : ""}" href="/hashtags">🔥 Xu hướng</a>
+        <a class="nav-item ${activeTab === "compare" ? "active" : ""}" href="/compare">⚖️ So sánh</a>
+        <a class="nav-item ${activeTab === "settings" ? "active" : ""}" href="/settings">🔌 Cấu hình</a>
+      </nav>
+
+      <div class="navbar-actions">
+        <form method="post" action="/listen" style="display:inline-block; margin:0;">
+          <button class="btn btn-sm btn-primary" type="submit" title="Quét tin tức mới ngay trên tất cả các kênh">🔄 Quét tin</button>
+        </form>
+        <form method="post" action="/logout" style="display:inline-block; margin:0;">
+          <button class="btn btn-sm btn-outline" type="submit" title="Đăng xuất khỏi hệ thống">Đăng xuất</button>
+        </form>
+      </div>
+    </div>
+  </header>`;
+}
+
+function layout(title: string, body: string, activeTab = "dashboard"): string {
   return `<!doctype html>
 <html lang="vi">
 <head>
@@ -1463,6 +1441,10 @@ function layout(title: string, body: string): string {
     }
 
     * { box-sizing: border-box; }
+    html {
+      scroll-padding-top: 80px;
+      scroll-behavior: smooth;
+    }
     body {
       margin: 0;
       min-height: 100dvh;
@@ -1474,47 +1456,68 @@ function layout(title: string, body: string): string {
       -webkit-font-smoothing: antialiased;
     }
 
-    main {
-      position: relative;
-      max-width: 1440px;
-      margin: 0 auto;
-      padding: 24px 28px 80px;
-      z-index: 1;
+    /* SCROLL MARGIN TRÁNH BỊ NAVBAR ĐÈ LÊN KHI NHẢY TỚI ANCHOR */
+    #deck-admin-panel, .executive-radar, .deck-ribbon, .deck-dual-streams, .radar-cloud-card, .deck-page-header {
+      scroll-margin-top: 80px;
     }
 
-    /* TOP BAR / HEROUI NAVBAR */
-    .deck-top-bar {
+    /* HEROUI STICKY NAVBAR - DUY NHẤT 1 HÀNG 64PX */
+    .deck-top-navbar {
+      position: sticky;
+      top: 0;
+      left: 0;
+      right: 0;
+      width: 100%;
+      height: 64px;
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--line);
+      z-index: 100;
+      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.03);
+    }
+    .navbar-container {
+      max-width: 1440px;
+      height: 100%;
+      margin: 0 auto;
+      padding: 0 24px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      flex-wrap: wrap;
       gap: 16px;
-      padding: 16px 20px;
-      background: rgba(255, 255, 255, 0.85);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid var(--line);
-      border-radius: var(--radius-xl);
-      margin-bottom: 24px;
-      box-shadow: var(--shadow-sm);
-      position: sticky;
-      top: 16px;
-      z-index: 50;
     }
 
-    .brand-row {
+    /* BRAND */
+    .navbar-brand {
       display: flex;
       align-items: center;
       gap: 10px;
+      flex-shrink: 0;
     }
+    .brand-link {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-decoration: none;
+      color: var(--ink);
+    }
+    .brand-title {
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+    .brand-badge {
+      display: inline-block;
+    }
+
     .live-dot {
       display: inline-flex;
       align-items: center;
       justify-content: center;
     }
     .heroui-pulse {
-      width: 10px;
-      height: 10px;
+      width: 9px;
+      height: 9px;
       border-radius: 999px;
       background: var(--heroui-success);
       display: inline-block;
@@ -1523,27 +1526,8 @@ function layout(title: string, body: string): string {
     }
     @keyframes beat { 50% { transform: scale(0.8); opacity: 0.6; } }
 
-    .brand-title {
-      font-size: 1.45rem;
-      font-weight: 700;
-      color: var(--ink);
-      letter-spacing: -0.03em;
-    }
-    .brand-desc {
-      margin: 4px 0 0;
-      font-size: 0.84rem;
-      color: var(--muted);
-    }
-
-    .deck-top-right {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      flex-wrap: wrap;
-    }
-
-    /* HEROUI PILL NAVIGATION */
-    .deck-nav {
+    /* NAV ITEMS (PILL TABS) */
+    .navbar-nav {
       display: flex;
       align-items: center;
       gap: 4px;
@@ -1551,32 +1535,86 @@ function layout(title: string, body: string): string {
       padding: 4px;
       border-radius: var(--radius-full);
       border: 1px solid var(--line);
-    }
-    .nav-btn {
-      text-decoration: none;
-      font-size: 0.82rem;
-      font-weight: 500;
-      color: var(--muted);
-      padding: 7px 14px;
-      border-radius: var(--radius-full);
-      transition: all 0.2s ease;
+      overflow-x: auto;
       white-space: nowrap;
     }
-    .nav-btn:hover {
+    .nav-item {
+      text-decoration: none;
+      font-size: 0.84rem;
+      font-weight: 500;
+      color: var(--muted);
+      padding: 6px 14px;
+      border-radius: var(--radius-full);
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .nav-item:hover {
       color: var(--ink);
       background: rgba(0, 0, 0, 0.04);
     }
-    .nav-btn.active {
+    .nav-item.active {
       color: #ffffff;
       background: var(--heroui-primary);
       box-shadow: 0 2px 8px rgba(0, 111, 238, 0.35);
       font-weight: 600;
     }
 
-    .top-actions {
+    /* NAVBAR ACTIONS */
+    .navbar-actions {
       display: flex;
       align-items: center;
       gap: 8px;
+      flex-shrink: 0;
+    }
+
+    /* PAGE MAIN WRAPPER */
+    main {
+      position: relative;
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 24px 24px 80px;
+      z-index: 1;
+    }
+
+    /* PAGE HERO HEADER (SUBHEADER) */
+    .deck-page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      padding: 18px 24px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-xl);
+      margin-bottom: 24px;
+      box-shadow: var(--shadow-sm);
+    }
+    .title-with-badge {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .deck-page-header h1 {
+      margin: 0;
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--ink);
+    }
+    .deck-page-header p {
+      margin: 4px 0 0;
+      font-size: 0.86rem;
+      color: var(--muted);
+    }
+    .page-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
     }
 
     /* HEROUI BUTTONS */
@@ -1727,6 +1765,7 @@ function layout(title: string, body: string): string {
       border-radius: var(--radius-md);
       transition: all 0.2s ease;
       outline: none;
+      text-overflow: ellipsis;
     }
     .heroui-input:hover, .heroui-select:hover, .heroui-textarea:hover {
       background: #f0f0f2;
@@ -1749,6 +1788,7 @@ function layout(title: string, body: string): string {
       font-weight: 600;
       color: var(--ink-soft);
       margin-bottom: 12px;
+      min-width: 0;
     }
     .heroui-link {
       color: var(--heroui-primary);
@@ -2082,7 +2122,7 @@ function layout(title: string, body: string): string {
       background: rgba(0, 0, 0, 0.06);
     }
 
-    /* ADMIN ACCORDION PANEL */
+    /* ADMIN ACCORDION PANEL - 2 CỘT RỘNG RÃI */
     .deck-admin-details {
       margin-bottom: 24px;
       overflow: hidden;
@@ -2134,29 +2174,43 @@ function layout(title: string, body: string): string {
     }
     .deck-admin-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+      gap: 20px;
       padding: 20px;
       background: var(--line-subtle);
       border-top: 1px solid var(--line);
     }
+    @media (max-width: 640px) {
+      .deck-admin-grid {
+        grid-template-columns: 1fr;
+      }
+    }
     .admin-card {
-      padding: 16px;
+      padding: 18px;
       display: flex;
       flex-direction: column;
       gap: 14px;
     }
     .admin-card-head h3 {
       margin: 0;
-      font-size: 0.98rem;
+      font-size: 1rem;
       font-weight: 700;
+      color: var(--ink);
+      line-height: 1.4;
     }
     .form-row {
       display: flex;
-      gap: 10px;
+      gap: 12px;
+    }
+    @media (max-width: 520px) {
+      .form-row {
+        flex-direction: column;
+        gap: 8px;
+      }
     }
     .form-row > * {
       flex: 1;
+      min-width: 0;
     }
     .check-label {
       display: flex;
@@ -2185,6 +2239,7 @@ function layout(title: string, body: string): string {
       flex-direction: column;
       gap: 4px;
       overflow: hidden;
+      min-width: 0;
     }
     .tool-title-wrap {
       display: flex;
@@ -2223,6 +2278,7 @@ function layout(title: string, body: string): string {
       display: flex;
       gap: 8px;
       margin-top: 8px;
+      flex-wrap: wrap;
     }
 
     /* RIBBON FILTER BAR */
@@ -2778,6 +2834,7 @@ function layout(title: string, body: string): string {
   </style>
 </head>
 <body>
+  ${renderNavbar(activeTab)}
   <main>
     ${body}
   </main>
