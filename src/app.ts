@@ -13,10 +13,31 @@ import { deliverExecutiveReport, deliverHit } from "./notify.js";
 import { buildSearchQuery } from "./query.js";
 import { lexiconWord } from "./sentiment.js";
 import { buckets, briefMarkdown, buildBrief, dayStartIso, daysEnding, localDay, spikeReason, type Brief } from "./digest.js";
-import { briefPage, comparePage, dashboardPage, loginPage, mentionsCsv } from "./pages.js";
+import { briefPage, comparePage, dashboardPage, loginPage, mentionsCsv, settingsPage } from "./pages.js";
 
 const COOKIE = "xl_session";
 const attempts = new Map<string, { count: number; resetAt: number }>();
+
+export function getRuntimeConfig(base: AppConfig, store: Store): AppConfig {
+  const dbSettings = store.getAllSettings();
+  return {
+    ...base,
+    X_BEARER_TOKEN: dbSettings.X_BEARER_TOKEN ?? base.X_BEARER_TOKEN,
+    TWITTER_AUTH_TOKEN: dbSettings.TWITTER_AUTH_TOKEN ?? base.TWITTER_AUTH_TOKEN,
+    TWITTER_CT0: dbSettings.TWITTER_CT0 ?? base.TWITTER_CT0,
+    FACEBOOK_ACCESS_TOKEN: dbSettings.FACEBOOK_ACCESS_TOKEN ?? base.FACEBOOK_ACCESS_TOKEN,
+    FACEBOOK_COOKIE: dbSettings.FACEBOOK_COOKIE ?? base.FACEBOOK_COOKIE,
+    THREADS_ACCESS_TOKEN: dbSettings.THREADS_ACCESS_TOKEN ?? base.THREADS_ACCESS_TOKEN,
+    YOUTUBE_API_KEY: dbSettings.YOUTUBE_API_KEY ?? base.YOUTUBE_API_KEY,
+    LLM_API_KEY: dbSettings.LLM_API_KEY ?? base.LLM_API_KEY,
+    LLM_BASE_URL: dbSettings.LLM_BASE_URL ?? base.LLM_BASE_URL,
+    LLM_MODEL: dbSettings.LLM_MODEL ?? base.LLM_MODEL,
+    ALERT_WEBHOOK_URL: dbSettings.ALERT_WEBHOOK_URL ?? base.ALERT_WEBHOOK_URL,
+    DESKTOP_NOTIFY: dbSettings.DESKTOP_NOTIFY === "0" || dbSettings.DESKTOP_NOTIFY === "1" ? dbSettings.DESKTOP_NOTIFY : base.DESKTOP_NOTIFY,
+    LISTEN_INTERVAL_MINUTES: Number(dbSettings.LISTEN_INTERVAL_MINUTES) || base.LISTEN_INTERVAL_MINUTES,
+    SEARCH_MAX_RESULTS: Number(dbSettings.SEARCH_MAX_RESULTS) || base.SEARCH_MAX_RESULTS,
+  };
+}
 
 export function createApp(config: AppConfig, store: Store) {
   const app = new Hono();
@@ -27,15 +48,16 @@ export function createApp(config: AppConfig, store: Store) {
     if (listening) return { saved: 0, topics: 0, errors: ["Đang nghe một lượt khác."] };
     listening = true;
     try {
+      const activeConfig = getRuntimeConfig(config, store);
       const report = await listenOnce(store, {
-        token: config.X_BEARER_TOKEN,
-        twitterAuthToken: config.TWITTER_AUTH_TOKEN,
-        twitterCt0: config.TWITTER_CT0,
-        facebookToken: config.FACEBOOK_ACCESS_TOKEN,
-        facebookCookie: config.FACEBOOK_COOKIE,
-        threadsToken: config.THREADS_ACCESS_TOKEN,
-        youtubeApiKey: config.YOUTUBE_API_KEY,
-        maxResults: config.SEARCH_MAX_RESULTS,
+        token: activeConfig.X_BEARER_TOKEN,
+        twitterAuthToken: activeConfig.TWITTER_AUTH_TOKEN,
+        twitterCt0: activeConfig.TWITTER_CT0,
+        facebookToken: activeConfig.FACEBOOK_ACCESS_TOKEN,
+        facebookCookie: activeConfig.FACEBOOK_COOKIE,
+        threadsToken: activeConfig.THREADS_ACCESS_TOKEN,
+        youtubeApiKey: activeConfig.YOUTUBE_API_KEY,
+        maxResults: activeConfig.SEARCH_MAX_RESULTS,
         onlyTopicId: extra?.onlyTopicId,
         startTime: extra?.startTime,
       });
@@ -47,13 +69,14 @@ export function createApp(config: AppConfig, store: Store) {
   }
 
   async function fanOutHits(): Promise<void> {
+    const activeConfig = getRuntimeConfig(config, store);
     const hits = store.listPendingNotices();
     const done: string[] = [];
     for (const hit of hits) {
       try {
         const error = await deliverHit(hit, {
-          webhookUrl: config.ALERT_WEBHOOK_URL,
-          desktop: config.DESKTOP_NOTIFY === "1",
+          webhookUrl: activeConfig.ALERT_WEBHOOK_URL,
+          desktop: activeConfig.DESKTOP_NOTIFY === "1",
         });
         if (error) notifyError = error;
         else done.push(hit.id);
@@ -126,6 +149,7 @@ export function createApp(config: AppConfig, store: Store) {
     const week = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const today = localDay(new Date());
     const series = buckets(store.listHeardSince(dayStartIso(daysEnding(today, 7)[0] ?? today)), daysEnding(today, 7), topic);
+    const activeConfig = getRuntimeConfig(config, store);
     return c.html(
       dashboardPage({
         topics: store.listTopics(),
@@ -147,10 +171,10 @@ export function createApp(config: AppConfig, store: Store) {
         assignedToFilter: assignedTo,
         tagFilter: tag,
         templates: store.listTemplates(),
-        hasToken: Boolean(config.X_BEARER_TOKEN.trim() || (config.TWITTER_AUTH_TOKEN.trim() && config.TWITTER_CT0.trim())),
-        hasFacebook: Boolean(config.FACEBOOK_ACCESS_TOKEN.trim() || config.FACEBOOK_COOKIE.trim()),
-        hasThreads: Boolean(config.THREADS_ACCESS_TOKEN.trim()),
-        hasYoutube: Boolean(config.YOUTUBE_API_KEY.trim()),
+        hasToken: Boolean(activeConfig.X_BEARER_TOKEN.trim() || (activeConfig.TWITTER_AUTH_TOKEN.trim() && activeConfig.TWITTER_CT0.trim())),
+        hasFacebook: Boolean(activeConfig.FACEBOOK_ACCESS_TOKEN.trim() || activeConfig.FACEBOOK_COOKIE.trim()),
+        hasThreads: Boolean(activeConfig.THREADS_ACCESS_TOKEN.trim()),
+        hasYoutube: Boolean(activeConfig.YOUTUBE_API_KEY.trim()),
         notice,
         stats: store.stats(since),
         days: series.map((row) => ({ day: row.day, count: row.posts })),
@@ -160,25 +184,66 @@ export function createApp(config: AppConfig, store: Store) {
         muted: store.listMuted(),
         queueNew: store.countNew(),
         lexicon: store.listLexicon(),
-        outbound: outboundLabel(config),
+        outbound: outboundLabel(activeConfig),
         notifyError,
         spike: spikeReason(series, today),
       }),
     );
   });
 
-  app.get("/brief", async (c) => {
+  app.get("/settings", (c) => {
+    const activeConfig = getRuntimeConfig(config, store);
     const notice = c.req.query("notice") ?? "";
-    const brief = await todayBrief(store, config);
+    return c.html(settingsPage(activeConfig, notice));
+  });
+
+  app.post("/settings", async (c) => {
+    const body = await c.req.parseBody();
+    const fields = [
+      "TWITTER_AUTH_TOKEN",
+      "TWITTER_CT0",
+      "X_BEARER_TOKEN",
+      "FACEBOOK_COOKIE",
+      "FACEBOOK_ACCESS_TOKEN",
+      "THREADS_ACCESS_TOKEN",
+      "YOUTUBE_API_KEY",
+      "LLM_API_KEY",
+      "LLM_BASE_URL",
+      "LLM_MODEL",
+      "ALERT_WEBHOOK_URL",
+    ];
+
+    for (const key of fields) {
+      if (body[key] !== undefined) {
+        store.setSetting(key, String(body[key] ?? "").trim());
+      }
+    }
+
+    store.setSetting("DESKTOP_NOTIFY", body.DESKTOP_NOTIFY === "1" ? "1" : "0");
+    if (body.LISTEN_INTERVAL_MINUTES) {
+      store.setSetting("LISTEN_INTERVAL_MINUTES", String(body.LISTEN_INTERVAL_MINUTES));
+    }
+    if (body.SEARCH_MAX_RESULTS) {
+      store.setSetting("SEARCH_MAX_RESULTS", String(body.SEARCH_MAX_RESULTS));
+    }
+
+    return c.redirect("/settings?notice=" + encodeURIComponent("Đã lưu cài đặt và áp dụng ngay lập tức!"));
+  });
+
+  app.get("/brief", async (c) => {
+    const activeConfig = getRuntimeConfig(config, store);
+    const notice = c.req.query("notice") ?? "";
+    const brief = await todayBrief(store, activeConfig);
     return c.html(briefPage(brief, notice));
   });
 
   app.post("/brief/send-webhook", async (c) => {
-    if (!config.ALERT_WEBHOOK_URL.trim()) {
-      return c.redirect("/brief?notice=" + encodeURIComponent("Chưa cấu hình ALERT_WEBHOOK_URL trong file .env"));
+    const activeConfig = getRuntimeConfig(config, store);
+    if (!activeConfig.ALERT_WEBHOOK_URL.trim()) {
+      return c.redirect("/brief?notice=" + encodeURIComponent("Chưa cấu hình ALERT_WEBHOOK_URL"));
     }
-    const brief = await todayBrief(store, config);
-    const err = await deliverExecutiveReport(brief, config.ALERT_WEBHOOK_URL);
+    const brief = await todayBrief(store, activeConfig);
+    const err = await deliverExecutiveReport(brief, activeConfig.ALERT_WEBHOOK_URL);
     if (err) {
       return c.redirect("/brief?notice=" + encodeURIComponent(`Không gửi được báo cáo: ${err}`));
     }
@@ -574,14 +639,15 @@ export function createApp(config: AppConfig, store: Store) {
       return c.json({ ok: false, error: parsed.error.issues[0]?.message ?? "Invalid body" }, 400);
     }
 
-    if (!config.LLM_API_KEY.trim()) {
-      return c.json({ ok: false, error: "Chưa cấu hình LLM_API_KEY trong file .env" }, 400);
+    const activeConfig = getRuntimeConfig(config, store);
+    if (!activeConfig.LLM_API_KEY.trim()) {
+      return c.json({ ok: false, error: "Chưa cấu hình LLM_API_KEY (trong Cài đặt hoặc .env)" }, 400);
     }
 
     const result = await analyzePostWithAi(parsed.data.text, {
-      apiKey: config.LLM_API_KEY,
-      baseUrl: config.LLM_BASE_URL,
-      model: config.LLM_MODEL,
+      apiKey: activeConfig.LLM_API_KEY,
+      baseUrl: activeConfig.LLM_BASE_URL,
+      model: activeConfig.LLM_MODEL,
     });
 
     if (!result) {
@@ -597,11 +663,12 @@ export function createApp(config: AppConfig, store: Store) {
     if (!bearer || !passwordsMatch(bearer, config.ADMIN_PASSWORD)) {
       return c.json({ ok: false, error: "Unauthorized" }, 401);
     }
-    if (!config.ALERT_WEBHOOK_URL.trim()) {
-      return c.json({ ok: false, error: "Chưa cấu hình ALERT_WEBHOOK_URL trong file .env" }, 400);
+    const activeConfig = getRuntimeConfig(config, store);
+    if (!activeConfig.ALERT_WEBHOOK_URL.trim()) {
+      return c.json({ ok: false, error: "Chưa cấu hình ALERT_WEBHOOK_URL" }, 400);
     }
-    const brief = await todayBrief(store, config);
-    const err = await deliverExecutiveReport(brief, config.ALERT_WEBHOOK_URL);
+    const brief = await todayBrief(store, activeConfig);
+    const err = await deliverExecutiveReport(brief, activeConfig.ALERT_WEBHOOK_URL);
     if (err) {
       return c.json({ ok: false, error: err }, 502);
     }

@@ -1,5 +1,5 @@
 import { serve } from "@hono/node-server";
-import { createApp } from "./app.js";
+import { createApp, getRuntimeConfig } from "./app.js";
 import { loadConfig } from "./config.js";
 import { Store } from "./db.js";
 
@@ -8,13 +8,14 @@ const store = Store.open(config.DATABASE_PATH);
 const { app, runListen } = createApp(config, store);
 
 const timer = setInterval(() => {
+  const current = getRuntimeConfig(config, store);
   const hasAnyAuth = Boolean(
-    config.X_BEARER_TOKEN.trim() ||
-      (config.TWITTER_AUTH_TOKEN.trim() && config.TWITTER_CT0.trim()) ||
-      config.FACEBOOK_ACCESS_TOKEN.trim() ||
-      config.FACEBOOK_COOKIE.trim() ||
-      config.THREADS_ACCESS_TOKEN.trim() ||
-      config.YOUTUBE_API_KEY.trim(),
+    current.X_BEARER_TOKEN.trim() ||
+      (current.TWITTER_AUTH_TOKEN.trim() && current.TWITTER_CT0.trim()) ||
+      current.FACEBOOK_ACCESS_TOKEN.trim() ||
+      current.FACEBOOK_COOKIE.trim() ||
+      current.THREADS_ACCESS_TOKEN.trim() ||
+      current.YOUTUBE_API_KEY.trim(),
   );
   if (!hasAnyAuth) return;
   runListen()

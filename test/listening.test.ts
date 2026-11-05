@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { alertReason } from "../src/alerts.js";
 import { briefMarkdown, buildBrief, spikeReason, type DigestPost } from "../src/digest.js";
-import { createApp } from "../src/app.js";
+import { createApp, getRuntimeConfig } from "../src/app.js";
 import { issueSession, sessionValid } from "../src/auth.js";
 import type { AppConfig } from "../src/config.js";
 import { Store } from "../src/db.js";
@@ -1321,6 +1321,62 @@ test("listenOnce tự động chạy chế độ cookie khi không có API token
   const mention = store.listMentions()[0];
   assert.equal(mention?.id, "1899999999999999998");
   assert.equal(mention?.author_username, "khachhang");
+
+  store.close();
+});
+
+test("quản lý cài đặt runtime settings trong database và override config", async () => {
+  const store = Store.open(":memory:");
+  const base = testConfig();
+
+  // Ban đầu rỗng
+  let runtime = getRuntimeConfig(base, store);
+  assert.equal(runtime.TWITTER_AUTH_TOKEN, "");
+  assert.equal(runtime.ALERT_WEBHOOK_URL, "");
+
+  // Lưu cài đặt vào DB
+  store.setSetting("TWITTER_AUTH_TOKEN", "new_cookie_123");
+  store.setSetting("ALERT_WEBHOOK_URL", "https://discord.com/api/webhooks/mywebhook");
+  store.setSetting("SEARCH_MAX_RESULTS", "50");
+
+  runtime = getRuntimeConfig(base, store);
+  assert.equal(runtime.TWITTER_AUTH_TOKEN, "new_cookie_123");
+  assert.equal(runtime.ALERT_WEBHOOK_URL, "https://discord.com/api/webhooks/mywebhook");
+  assert.equal(runtime.SEARCH_MAX_RESULTS, 50);
+
+  // Test qua HTTP request vào route /settings
+  const { app } = createApp(base, store);
+  const session = issueSession(base.ADMIN_PASSWORD);
+
+  // GET /settings
+  const getRes = await app.request("/settings", {
+    headers: {
+      cookie: `xl_session=${session}`,
+    },
+  });
+  assert.equal(getRes.status, 200);
+  const html = await getRes.text();
+  assert.match(html, /Cài đặt Bàn nghe/);
+  assert.match(html, /new_cookie_123/);
+
+  // POST /settings
+  const postRes = await app.request("/settings", {
+    method: "POST",
+    headers: {
+      cookie: `xl_session=${session}`,
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      TWITTER_AUTH_TOKEN: "updated_auth_token",
+      TWITTER_CT0: "updated_ct0",
+      FACEBOOK_COOKIE: "c_user=999; xs=xyz;",
+    }).toString(),
+  });
+
+  assert.equal(postRes.status, 302);
+  assert.equal(store.getSetting("TWITTER_AUTH_TOKEN"), "updated_auth_token");
+  assert.equal(store.getSetting("TWITTER_CT0"), "updated_ct0");
+  assert.equal(store.getSetting("FACEBOOK_COOKIE"), "c_user=999; xs=xyz;");
 
   store.close();
 });

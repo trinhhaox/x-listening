@@ -1,5 +1,6 @@
 import type { AlertHitRow, AlertRule, MentionRow, MentionView, ResponseTemplate, Topic, Voice } from "./db.js";
 import type { Brief, DayCount } from "./digest.js";
+import type { AppConfig } from "./config.js";
 
 export function escapeHtml(value: string): string {
   return value
@@ -240,6 +241,7 @@ export function dashboardPage(model: DashboardModel): string {
       </div>
       <a class="nav" href="/brief">Bản tin</a>
       <a class="nav" href="/compare">So tần số</a>
+      <a class="nav" href="/settings">Cài đặt</a>
       <form method="post" action="/listen"><button type="submit">Lắng nghe ngay</button></form>
       <form method="post" action="/logout"><button class="quiet" type="submit">Thoát</button></form>
     </header>
@@ -394,6 +396,7 @@ export function briefPage(brief: Brief, notice?: string): string {
       </div>
       <a class="nav" href="/">Dây tin</a>
       <a class="nav" href="/brief.md">Tải Markdown</a>
+      <a class="nav" href="/settings">Cài đặt</a>
       <form method="post" action="/brief/send-webhook"><button type="submit">Gửi Webhook</button></form>
     </header>
     ${notice ? `<p class="notice">${escapeHtml(notice)}</p>` : ""}
@@ -440,6 +443,7 @@ export function comparePage(model: { topics: Topic[]; left: string; right: strin
         <h1>Hai tần số cạnh nhau.</h1>
       </div>
       <a class="nav" href="/">Dây tin</a>
+      <a class="nav" href="/settings">Cài đặt</a>
     </header>
     <form class="compare-form" method="get" action="/compare">
       <label>Tần số A<select name="left">${options(model.left)}</select></label>
@@ -448,6 +452,99 @@ export function comparePage(model: { topics: Topic[]; left: string; right: strin
     </form>
     <p class="legend"><i class="left"></i>${escapeHtml(leftName)} <i class="right"></i>${escapeHtml(rightName)}</p>
     <section class="days compare-days">${bars}</section>`,
+  );
+}
+
+export function settingsPage(config: AppConfig, notice?: string): string {
+  return layout(
+    "Cài đặt Bàn nghe",
+    `<header class="top">
+      <div>
+        <p class="kicker">Cấu hình hệ thống</p>
+        <h1>Cài đặt Bàn nghe</h1>
+      </div>
+      <a class="nav" href="/">Quay lại Dây tin</a>
+      <a class="nav" href="/brief">Bản tin</a>
+      <form method="post" action="/logout"><button class="quiet" type="submit">Thoát</button></form>
+    </header>
+    ${notice ? `<p class="notice">${escapeHtml(notice)}</p>` : ""}
+    <form class="settings-form" method="post" action="/settings">
+      <div class="settings-grid">
+        <div class="settings-card">
+          <h2>🐦 X (Twitter)</h2>
+          <p class="hint">Khuyến nghị dùng Cookie để không cần đăng ký tài khoản Developer ($100/tháng).</p>
+          <label>Cookie auth_token
+            <input type="password" name="TWITTER_AUTH_TOKEN" value="${escapeHtml(config.TWITTER_AUTH_TOKEN)}" placeholder="Từ x.com F12 -> Cookies -> auth_token" />
+          </label>
+          <label>Cookie ct0 (CSRF token)
+            <input type="password" name="TWITTER_CT0" value="${escapeHtml(config.TWITTER_CT0)}" placeholder="Từ x.com F12 -> Cookies -> ct0" />
+          </label>
+          <label>Hoặc Bearer Token Developer API (Nếu có)
+            <input type="password" name="X_BEARER_TOKEN" value="${escapeHtml(config.X_BEARER_TOKEN)}" placeholder="Bearer token chính thức của X API v2" />
+          </label>
+        </div>
+
+        <div class="settings-card">
+          <h2>👤 Facebook (Fanpage)</h2>
+          <p class="hint">Khuyến nghị dùng Cookie để đọc bài Trang công khai mà không cần Meta App Review.</p>
+          <label>Cookie Facebook (chuỗi c_user & xs)
+            <textarea name="FACEBOOK_COOKIE" rows="3" placeholder="c_user=...; xs=...;">${escapeHtml(config.FACEBOOK_COOKIE)}</textarea>
+          </label>
+          <label>Hoặc Facebook Page Access Token (Nếu có)
+            <input type="password" name="FACEBOOK_ACCESS_TOKEN" value="${escapeHtml(config.FACEBOOK_ACCESS_TOKEN)}" placeholder="Token Graph API chính thức" />
+          </label>
+        </div>
+
+        <div class="settings-card">
+          <h2>🧵 Meta Threads & ▶️ YouTube</h2>
+          <label>Threads User Access Token
+            <input type="password" name="THREADS_ACCESS_TOKEN" value="${escapeHtml(config.THREADS_ACCESS_TOKEN)}" placeholder="Threads Graph API Token" />
+          </label>
+          <label>YouTube Data API v3 Key
+            <input type="password" name="YOUTUBE_API_KEY" value="${escapeHtml(config.YOUTUBE_API_KEY)}" placeholder="AIzaSy..." />
+          </label>
+        </div>
+
+        <div class="settings-card">
+          <h2>🤖 Trí tuệ Nhân tạo & Tóm tắt AI</h2>
+          <p class="hint">Hỗ trợ mọi endpoint OpenAI-compatible (OpenAI, Gemini, Groq, Ollama...).</p>
+          <label>LLM API Key
+            <input type="password" name="LLM_API_KEY" value="${escapeHtml(config.LLM_API_KEY)}" placeholder="sk-..." />
+          </label>
+          <label>Base URL
+            <input type="text" name="LLM_BASE_URL" value="${escapeHtml(config.LLM_BASE_URL)}" placeholder="https://api.openai.com/v1" />
+          </label>
+          <label>Tên Model
+            <input type="text" name="LLM_MODEL" value="${escapeHtml(config.LLM_MODEL)}" placeholder="gpt-4o-mini" />
+          </label>
+        </div>
+
+        <div class="settings-card">
+          <h2>🔔 Chuông & Thông báo Outbound</h2>
+          <label>Webhook URL (Discord / Slack / Generic)
+            <input type="url" name="ALERT_WEBHOOK_URL" value="${escapeHtml(config.ALERT_WEBHOOK_URL)}" placeholder="https://discord.com/api/webhooks/... hoặc https://hooks.slack.com/..." />
+          </label>
+          <label class="check">
+            <input type="checkbox" name="DESKTOP_NOTIFY" value="1"${config.DESKTOP_NOTIFY === "1" ? " checked" : ""} />
+            Bật thông báo trên máy tính (Desktop Notification)
+          </label>
+        </div>
+
+        <div class="settings-card">
+          <h2>⏱️ Chu kỳ Lắng nghe & Giới hạn</h2>
+          <label>Khoảng cách quét tự động (phút, tối thiểu 5)
+            <input type="number" name="LISTEN_INTERVAL_MINUTES" min="5" max="1440" value="${config.LISTEN_INTERVAL_MINUTES}" />
+          </label>
+          <label>Số bài tối đa mỗi lần hỏi X (10 – 100)
+            <input type="number" name="SEARCH_MAX_RESULTS" min="10" max="100" value="${config.SEARCH_MAX_RESULTS}" />
+          </label>
+        </div>
+      </div>
+      <div style="margin-top: 24px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+        <button type="submit">Lưu cài đặt</button>
+        <span class="hint">Cài đặt được lưu vào cơ sở dữ liệu và có hiệu lực ngay lập tức mà không cần restart máy chủ.</span>
+      </div>
+    </form>`,
   );
 }
 
@@ -622,6 +719,9 @@ function layout(title: string, body: string): string {
     .empty { color: var(--muted); }
     .login { max-width: 420px; padding-top: 12vh; }
     .login h1 { max-width: none; margin-bottom: 18px; }
+    .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-top: 16px; }
+    .settings-card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+    .settings-card h2 { margin-top: 0; font-size: 1.1rem; color: var(--ink); }
     @media (max-width: 800px) {
       .split { grid-template-columns: 1fr; }
       aside { position: static; }

@@ -208,3 +208,4 @@ export function parseAdaptiveSearch(data: any): XCookiePost[] {
   }
   return posts;
 }
+
