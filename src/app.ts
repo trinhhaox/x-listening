@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
-import { analyzePostWithAi, generateAiBrief } from "./ai.js";
+import { analyzePostWithAi, classifyMentionRuleBased, classifyMentionWithAi, generateAiBrief } from "./ai.js";
 import { issueSession, sessionValid } from "./auth.js";
 import type { AppConfig } from "./config.js";
 import { muteKey, Store, type MentionView, type QueueState } from "./db.js";
@@ -12,8 +12,10 @@ import { listenOnce, type ListenReport } from "./listen.js";
 import { deliverExecutiveReport, deliverHit } from "./notify.js";
 import { buildSearchQuery } from "./query.js";
 import { lexiconWord } from "./sentiment.js";
+import { extractWordCloud } from "./cloud.js";
+import { analyzeHashtags } from "./hashtags.js";
 import { buckets, briefMarkdown, buildBrief, dayStartIso, daysEnding, localDay, spikeReason, type Brief } from "./digest.js";
-import { briefPage, comparePage, dashboardPage, loginPage, mentionsCsv, settingsPage } from "./pages.js";
+import { briefPage, comparePage, dashboardPage, hashtagsPage, loginPage, mentionsCsv, settingsPage } from "./pages.js";
 
 const COOKIE = "xl_session";
 const attempts = new Map<string, { count: number; resetAt: number }>();
@@ -150,6 +152,8 @@ export function createApp(config: AppConfig, store: Store) {
     const today = localDay(new Date());
     const series = buckets(store.listHeardSince(dayStartIso(daysEnding(today, 7)[0] ?? today)), daysEnding(today, 7), topic);
     const activeConfig = getRuntimeConfig(config, store);
+    const cloudMentions = store.listMentionsForCloud(week, topic || undefined);
+    const wordCloud = extractWordCloud(cloudMentions);
     return c.html(
       dashboardPage({
         topics: store.listTopics(),
@@ -196,6 +200,8 @@ export function createApp(config: AppConfig, store: Store) {
         outbound: outboundLabel(activeConfig),
         notifyError,
         spike: spikeReason(series, today),
+        wordCloud,
+        adminOpen: c.req.query("admin") === "1" || c.req.query("admin") === "open",
       }),
     );
   });
@@ -310,36 +316,52 @@ export function createApp(config: AppConfig, store: Store) {
     });
   });
 
+  app.get("/hashtags", (c) => {
+    const daysParam = Number(c.req.query("days"));
+    const days = [1, 7, 30].includes(daysParam) ? daysParam : 7;
+    const topic = c.req.query("topic") ?? "";
+    const notice = c.req.query("notice") ?? "";
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const mentions = store.listMentionsForHashtags(since, topic || undefined);
+    const analytics = analyzeHashtags(mentions, 50);
+
+    return c.html(
+      hashtagsPage({
+        analytics,
+        days,
+        activeTopic: topic,
+        topics: store.listTopics(),
+        notice,
+      }),
+    );
+  });
+
   app.post("/topics", async (c) => {
     const body = await c.req.parseBody();
     const name = String(body.name ?? "").trim().slice(0, 80);
     const rawQuery = String(body.query ?? "");
-    const source = ["facebook", "threads", "youtube"].includes(body.source as string)
-      ? (body.source as "facebook" | "threads" | "youtube")
+    const source = ["facebook", "threads", "youtube", "web"].includes(body.source as string)
+      ? (body.source as "facebook" | "threads" | "youtube" | "web")
       : "x";
     const phrase = String(body.phrase ?? "").trim().slice(0, 80);
     const exclude = body.exclude_reposts === "on" || body.exclude_reposts === "true";
     if (!name) return c.redirect("/?notice=" + encodeURIComponent("Thiếu tên tần số."));
     let query = rawQuery.replace(/\s+/g, " ").trim();
+    if (!query) {
+      return c.redirect("/?notice=" + encodeURIComponent("Câu truy vấn, từ khóa hoặc link không được để trống."));
+    }
+
     if (source === "facebook") {
       const page = pageKey(query);
-      if (!page) {
-        return c.redirect(
-          "/?notice=" + encodeURIComponent("Facebook cần link hoặc id một Trang. Không tìm được từ khóa trên mọi bài Facebook."),
-        );
+      if (page) {
+        query = page;
       }
-      query = page;
     } else if (source === "threads") {
       const user = threadsUserKey(query);
-      if (!user) {
-        return c.redirect("/?notice=" + encodeURIComponent("Threads cần username hoặc link tài khoản Threads."));
+      if (user) {
+        query = user;
       }
-      query = user;
-    } else if (source === "youtube") {
-      if (!query) {
-        return c.redirect("/?notice=" + encodeURIComponent("YouTube cần từ khóa tìm kiếm."));
-      }
-    } else {
+    } else if (source === "x") {
       try {
         buildSearchQuery(query, exclude);
       } catch (error) {
@@ -535,6 +557,49 @@ export function createApp(config: AppConfig, store: Store) {
     return c.redirect(deskPath(back.topic, back.view, undefined, back));
   });
 
+  app.post("/mentions/auto-classify", async (c) => {
+    const body = await c.req.parseBody();
+    const topic = String(body.topic ?? "").trim();
+    const unclassified = store.listUnclassifiedMentions(120, topic || undefined);
+
+    let count = 0;
+    for (const m of unclassified) {
+      const routing = classifyMentionRuleBased(m.text);
+      if (store.autoClassifyMention(m.topic_id, m.id, { tag: routing.tag, assignedTo: routing.assignedTo })) {
+        count++;
+      }
+    }
+
+    const back = await backFrom(c);
+    const msg = count > 0
+      ? `⚡ Đã phân loại & điều phối thành công ${count} bài viết.`
+      : "Không có bài viết nào cần phân loại thêm.";
+    return c.redirect(deskPath(back.topic, back.view, msg, back));
+  });
+
+  app.post("/mentions/:topicId/:mentionId/auto-classify", async (c) => {
+    const topicId = c.req.param("topicId");
+    const mentionId = c.req.param("mentionId");
+    const activeConfig = getRuntimeConfig(config, store);
+    const mention = store.getMention(topicId, mentionId);
+
+    if (safeKey(topicId) && safeKey(mentionId) && mention) {
+      const routing = await classifyMentionWithAi(mention.text, {
+        apiKey: activeConfig.LLM_API_KEY,
+        baseUrl: activeConfig.LLM_BASE_URL,
+        model: activeConfig.LLM_MODEL,
+      });
+      store.autoClassifyMention(topicId, mentionId, { tag: routing.tag, assignedTo: routing.assignedTo });
+      const back = await backFrom(c);
+      return c.redirect(
+        deskPath(back.topic, back.view, `⚡ Đã gắn #${routing.tag} & gán ${routing.assignedTo} (${routing.reason}).`, back),
+      );
+    }
+
+    const back = await backFrom(c);
+    return c.redirect(deskPath(back.topic, back.view, undefined, back));
+  });
+
   app.post("/templates", async (c) => {
     const body = await c.req.parseBody();
     const name = String(body.name ?? "").trim().slice(0, 80);
@@ -662,6 +727,54 @@ export function createApp(config: AppConfig, store: Store) {
     if (!result) {
       return c.json({ ok: false, error: "Không thể phân tích bằng AI" }, 502);
     }
+
+    return c.json({ ok: true, data: result });
+  });
+
+  app.get("/api/wordcloud", (c) => {
+    const topic = c.req.query("topic") ?? "";
+    const week = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const cloudMentions = store.listMentionsForCloud(week, topic || undefined);
+    const result = extractWordCloud(cloudMentions);
+    return c.json({ ok: true, data: result });
+  });
+
+  app.get("/api/hashtags", (c) => {
+    const daysParam = Number(c.req.query("days"));
+    const days = [1, 7, 30].includes(daysParam) ? daysParam : 7;
+    const topic = c.req.query("topic") ?? "";
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const mentions = store.listMentionsForHashtags(since, topic || undefined);
+    const analytics = analyzeHashtags(mentions, 100);
+    return c.json({ ok: true, data: analytics });
+  });
+
+  app.post("/api/ai/classify", async (c) => {
+    const authHeader = c.req.header("authorization") ?? "";
+    const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : (c.req.query("token") ?? "");
+    if (!bearer || !passwordsMatch(bearer, config.ADMIN_PASSWORD)) {
+      return c.json({ ok: false, error: "Unauthorized" }, 401);
+    }
+
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return c.json({ ok: false, error: "Invalid JSON" }, 400);
+    }
+
+    const schema = z.object({ text: z.string().min(1).max(5000) });
+    const parsed = schema.safeParse(json);
+    if (!parsed.success) {
+      return c.json({ ok: false, error: parsed.error.issues[0]?.message ?? "Invalid body" }, 400);
+    }
+
+    const activeConfig = getRuntimeConfig(config, store);
+    const result = await classifyMentionWithAi(parsed.data.text, {
+      apiKey: activeConfig.LLM_API_KEY,
+      baseUrl: activeConfig.LLM_BASE_URL,
+      model: activeConfig.LLM_MODEL,
+    });
 
     return c.json({ ok: true, data: result });
   });

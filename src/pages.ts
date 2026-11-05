@@ -1,6 +1,8 @@
 import type { AlertHitRow, AlertRule, MentionRow, MentionView, ResponseTemplate, Topic, Voice } from "./db.js";
 import type { Brief, DayCount } from "./digest.js";
 import type { AppConfig } from "./config.js";
+import type { WordCloudItem, TopicCluster } from "./cloud.js";
+import type { HashtagAnalyticsResult, HashtagStat } from "./hashtags.js";
 
 export function escapeHtml(value: string): string {
   return value
@@ -39,6 +41,8 @@ type DashboardModel = {
   lexicon: { word: string; polarity: string }[];
   outbound: string;
   notifyError: string;
+  wordCloud?: { words: WordCloudItem[]; clusters: TopicCluster[] };
+  adminOpen?: boolean;
 };
 
 export function loginPage(error = ""): string {
@@ -281,9 +285,11 @@ export function dashboardPage(model: DashboardModel): string {
       <div class="deck-top-right">
         <nav class="deck-nav">
           <a class="nav-btn active" href="/">Bàn nghe</a>
+          <a class="nav-btn" href="javascript:void(0)" onclick="const p=document.getElementById('deck-admin-panel'); if(p){ p.open=true; p.scrollIntoView({behavior:'smooth'}); }">⚙️ Tần số & Chuông</a>
           <a class="nav-btn" href="/brief">Bản tin AI</a>
+          <a class="nav-btn" href="/hashtags">Hashtags & Từ khóa</a>
           <a class="nav-btn" href="/compare">So tần số</a>
-          <a class="nav-btn" href="/settings">Cài đặt</a>
+          <a class="nav-btn" href="/settings">Cài đặt kết nối</a>
         </nav>
         <div class="top-actions">
           <form method="post" action="/listen">
@@ -384,6 +390,10 @@ export function dashboardPage(model: DashboardModel): string {
       </div>
     </section>
 
+    ${renderWordCloudSection(model.wordCloud, model.activeTopic)}
+
+    ${renderAdminPanel(model, topicItems, alertTopics, alertRules, templateItems, mutedItems, backFields)}
+
     <!-- KHU VỰC 2: THANH BỘ LỌC DÂY TIN & ĐIỀU PHỐI TOÀN CỤC -->
     <section class="deck-ribbon">
       <div class="ribbon-tabs">
@@ -419,7 +429,9 @@ export function dashboardPage(model: DashboardModel): string {
               : ""
           }
         </div>
-        <div class="ribbon-export">
+        <div class="ribbon-export" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <button class="btn btn-sm btn-outline" type="button" onclick="const p=document.getElementById('deck-admin-panel'); if(p){ p.open=!p.open; if(p.open) p.scrollIntoView({behavior:'smooth'}); }" title="Mở bảng cấu hình Tần số, Chuông cảnh báo, Từ điển">⚙️ Tần số & Chuông (${model.topics.length})</button>
+          <button class="btn btn-sm btn-primary" type="submit" form="auto-classify-form" title="Tự động phân loại tag và gán người xử lý cho các bài viết chưa được gán">⚡ AI Phân loại & Điều phối</button>
           <a class="btn btn-sm btn-outline" href="/export.csv?${(() => {
             const p = new URLSearchParams();
             if (model.activeTopic) p.set("topic", model.activeTopic);
@@ -431,6 +443,10 @@ export function dashboardPage(model: DashboardModel): string {
             return p.toString();
           })()}">📥 Tải CSV</a>
         </div>
+      </form>
+      <form id="auto-classify-form" method="post" action="/mentions/auto-classify" style="display:none;">
+        <input type="hidden" name="topic" value="${escapeHtml(model.activeTopic)}" />
+        <input type="hidden" name="view" value="${escapeHtml(model.view === "wire" ? "" : model.view)}" />
       </form>
     </section>
 
@@ -482,11 +498,36 @@ export function dashboardPage(model: DashboardModel): string {
         </div>
       </div>
     </section>
+    `,
+  );
+}
 
-    <!-- KHU VỰC 4: BẢNG ĐIỀU KHIỂN & CẤU HÌNH TẦN SỐ / CHUÔNG -->
-    <details class="deck-admin-details">
+function renderAdminPanel(
+  model: DashboardModel,
+  topicItems: string,
+  alertTopics: string,
+  alertRules: string,
+  templateItems: string,
+  mutedItems: string,
+  backFields: string,
+): string {
+  return `
+    <!-- BẢNG ĐIỀU KHIỂN & CẤU HÌNH TẦN SỐ / CHUÔNG (VỊ TRÍ TRÊN LUỒNG BÀI VIẾT) -->
+    <details id="deck-admin-panel" class="deck-admin-details" ${model.adminOpen ? "open" : ""}>
       <summary class="deck-admin-summary">
-        <span>⚙️ Quản lý Tần số, Chuông cảnh báo, Từ điển & Mẫu phản hồi nhanh</span>
+        <div class="admin-summary-content">
+          <div class="admin-summary-title">
+            <span class="admin-gear-icon">⚙️</span>
+            <strong>Quản lý Tần số, Chuông cảnh báo, Từ điển & Mẫu phản hồi</strong>
+          </div>
+          <div class="admin-summary-badges">
+            <span class="admin-pill">📡 ${model.topics.length} tần số</span>
+            <span class="admin-pill">🔔 ${model.alerts.length} chuông</span>
+            <span class="admin-pill">📚 ${model.lexicon.length} từ</span>
+            <span class="admin-pill">💬 ${model.templates.length} mẫu</span>
+            <span class="admin-pill-action">Bấm để cấu hình ▾</span>
+          </div>
+        </div>
         <span class="summary-arrow">▾</span>
       </summary>
 
@@ -499,17 +540,18 @@ export function dashboardPage(model: DashboardModel): string {
           <form class="admin-form" method="post" action="/topics">
             <div class="form-row">
               <label>Tên gọi<input name="name" required maxlength="80" placeholder="VD: Khách hàng phản ánh" /></label>
-              <label>Mạng xã hội
+              <label>Kênh theo dõi
                 <select name="source">
-                  <option value="x">X (Twitter)</option>
-                  <option value="facebook">Facebook Fanpage</option>
-                  <option value="threads">Threads</option>
-                  <option value="youtube">YouTube</option>
+                  <option value="x">X / Twitter (Từ khóa hoặc #Hashtag)</option>
+                  <option value="facebook">Facebook (Fanpage hoặc #Hashtag/Từ khóa)</option>
+                  <option value="threads">Threads (Tài khoản hoặc #Hashtag/Từ khóa)</option>
+                  <option value="youtube">YouTube (Video theo từ khóa/Hashtag)</option>
+                  <option value="web">Báo chí & Diễn đàn (Google News & RSS)</option>
                 </select>
               </label>
             </div>
-            <label>Câu tìm kiếm hoặc Link Page/User
-              <textarea name="query" required maxlength="300" rows="2" placeholder="&quot;thương hiệu&quot; hoặc link Fanpage/user"></textarea>
+            <label>Từ khóa, #Hashtag, hoặc Link Fanpage/Profile
+              <textarea name="query" required maxlength="300" rows="2" placeholder="Ví dụ: #rueco, &quot;mỹ phẩm rueco&quot;, link Fanpage hoặc tài khoản Threads"></textarea>
             </label>
             <div class="form-row">
               <label>Cụm giữ lại (FB/Threads)<input name="phrase" maxlength="80" placeholder="Để trống nếu lấy hết" /></label>
@@ -603,8 +645,66 @@ export function dashboardPage(model: DashboardModel): string {
         </div>
       </div>
     </details>
-    `,
-  );
+  `;
+}
+
+function renderWordCloudSection(
+  wordCloud?: { words: WordCloudItem[]; clusters: TopicCluster[] },
+  activeTopic = "",
+): string {
+  if (!wordCloud || (!wordCloud.words.length && !wordCloud.clusters.length)) {
+    return "";
+  }
+
+  const { words, clusters } = wordCloud;
+  const counts = words.map((w) => w.count);
+  const maxCount = counts.length > 0 ? Math.max(...counts) : 1;
+  const minCount = counts.length > 0 ? Math.min(...counts) : 1;
+
+  const clusterPills = clusters
+    .map((c) => {
+      const topicParam = activeTopic ? `&topic=${encodeURIComponent(activeTopic)}` : "";
+      return `<a href="/?search=${encodeURIComponent(c.keywords[0] ?? c.name)}${topicParam}" class="cloud-cluster-badge ${c.sentiment}" title="Cụm ${escapeHtml(c.name)}: ${c.keywords.join(", ")}">
+        <span class="cluster-icon">${c.icon}</span>
+        <span class="cluster-title">${escapeHtml(c.name)}</span>
+        <span class="cluster-num">${c.count} bài</span>
+      </a>`;
+    })
+    .join("");
+
+  const wordChips = words
+    .map((w) => {
+      const ratio = maxCount === minCount ? 0.5 : (w.count - minCount) / Math.max(1, maxCount - minCount);
+      const fontSize = (0.84 + ratio * 0.72).toFixed(2);
+      const topicParam = activeTopic ? `&topic=${encodeURIComponent(activeTopic)}` : "";
+      const searchParam = encodeURIComponent(w.text);
+      const sentimentLabel = w.sentiment === "positive" ? "Tốt" : w.sentiment === "negative" ? "Tiêu cực" : "Trung tính";
+      return `<a href="/?search=${searchParam}${topicParam}" class="cloud-word-chip ${w.sentiment}" style="font-size: ${fontSize}rem;" title="Từ '${escapeHtml(w.text)}' xuất hiện ${w.count} lần (${sentimentLabel}). Nhấn để lọc bài viết.">
+        <span class="chip-text">${escapeHtml(w.text)}</span>
+        <span class="chip-count">${w.count}</span>
+      </a>`;
+    })
+    .join("");
+
+  return `
+  <!-- KHU VỰC: ĐÁM MÂY TỪ KHÓA & CỤM CHỦ ĐỀ DƯ LUẬN (7 NGÀY) -->
+  <section class="radar-cloud-card">
+    <div class="cloud-card-header">
+      <div class="cloud-card-title">
+        <span class="cloud-icon">☁️</span>
+        <div>
+          <h3>Đám mây Từ khóa Dư luận & Cụm chủ đề</h3>
+          <span class="cloud-sub">Dữ liệu 7 ngày qua · Nhấn vào từ khóa hoặc nhóm chủ đề để lọc nhanh</span>
+        </div>
+      </div>
+      <div class="cloud-clusters-tray">
+        ${clusterPills}
+      </div>
+    </div>
+    <div class="cloud-words-wrapper">
+      ${wordChips || `<p class="empty-cloud">Chưa có bài viết trong 7 ngày để tổng hợp đám mây từ khóa.</p>`}
+    </div>
+  </section>`;
 }
 
 function renderMentionCard(
@@ -684,13 +784,20 @@ function renderMentionCard(
       </div>
 
       <div class="inline-forms">
+        <form class="inline-form" method="post" action="${action}/auto-classify">${backFields}
+          <button class="btn btn-xs btn-outline btn-ai-tag" type="submit" title="AI tự động phân loại và gán người xử lý cho riêng bài này">⚡ AI Gán</button>
+        </form>
+
         <form class="inline-form" method="post" action="${action}/tag">${backFields}
           <select name="tag" onchange="this.form.submit()" title="Gắn nhãn nhanh">
             <option value="">🏷️ Nhãn</option>
-            <option value="Dịch vụ"${mention.tag === "Dịch vụ" ? " selected" : ""}>Dịch vụ</option>
-            <option value="Sản phẩm"${mention.tag === "Sản phẩm" ? " selected" : ""}>Sản phẩm</option>
-            <option value="Giao hàng"${mention.tag === "Giao hàng" ? " selected" : ""}>Giao hàng</option>
-            <option value="Truyền thông"${mention.tag === "Truyền thông" ? " selected" : ""}>Truyền thông</option>
+            <option value="Giao hàng"${mention.tag === "Giao hàng" ? " selected" : ""}>📦 Giao hàng</option>
+            <option value="Dịch vụ"${mention.tag === "Dịch vụ" ? " selected" : ""}>🎧 Dịch vụ</option>
+            <option value="Sản phẩm"${mention.tag === "Sản phẩm" ? " selected" : ""}>💎 Sản phẩm</option>
+            <option value="Giá cả"${mention.tag === "Giá cả" ? " selected" : ""}>🏷️ Giá cả</option>
+            <option value="Khen ngợi"${mention.tag === "Khen ngợi" ? " selected" : ""}>🌟 Khen ngợi</option>
+            <option value="Truyền thông"${mention.tag === "Truyền thông" ? " selected" : ""}>📢 Truyền thông</option>
+            <option value="Chung"${mention.tag === "Chung" ? " selected" : ""}>💬 Chung</option>
             <option value="Khác"${mention.tag === "Khác" ? " selected" : ""}>Khác</option>
           </select>
         </form>
@@ -779,8 +886,9 @@ export function briefPage(brief: Brief, notice?: string): string {
         <nav class="deck-nav">
           <a class="nav-btn" href="/">Bàn nghe</a>
           <a class="nav-btn active" href="/brief">Bản tin AI</a>
+          <a class="nav-btn" href="/hashtags">Hashtags & Từ khóa</a>
           <a class="nav-btn" href="/compare">So tần số</a>
-          <a class="nav-btn" href="/settings">Cài đặt</a>
+          <a class="nav-btn" href="/settings">Cài đặt kết nối</a>
         </nav>
         <div class="top-actions">
           <a class="btn btn-outline" href="/brief.md">Tải Markdown</a>
@@ -895,8 +1003,9 @@ export function comparePage(model: { topics: Topic[]; left: string; right: strin
         <nav class="deck-nav">
           <a class="nav-btn" href="/">Bàn nghe</a>
           <a class="nav-btn" href="/brief">Bản tin AI</a>
+          <a class="nav-btn" href="/hashtags">Hashtags & Từ khóa</a>
           <a class="nav-btn active" href="/compare">So tần số</a>
-          <a class="nav-btn" href="/settings">Cài đặt</a>
+          <a class="nav-btn" href="/settings">Cài đặt kết nối</a>
         </nav>
       </div>
     </header>
@@ -926,6 +1035,201 @@ export function comparePage(model: { topics: Topic[]; left: string; right: strin
   );
 }
 
+export type HashtagsPageModel = {
+  analytics: HashtagAnalyticsResult;
+  days: number;
+  activeTopic?: string;
+  topics: Topic[];
+  notice?: string;
+};
+
+export function hashtagsPage(model: HashtagsPageModel): string {
+  const { analytics, days, activeTopic, topics, notice } = model;
+
+  const topicOptions = topics
+    .map(
+      (t) =>
+        `<option value="${escapeHtml(t.id)}"${t.id === activeTopic ? " selected" : ""}>${escapeHtml(t.name)}</option>`,
+    )
+    .join("");
+
+  const rows = analytics.list
+    .map((h, i) => {
+      const statusBadge =
+        h.sentimentStatus === "warning"
+          ? `<span class="tag-status-badge warning" title="Tỷ lệ tiêu cực ≥ 30%">🚨 Cảnh báo (${h.negPct}% xấu)</span>`
+          : h.sentimentStatus === "positive"
+            ? `<span class="tag-status-badge pos">🟢 Tích cực (${h.posPct}%)</span>`
+            : `<span class="tag-status-badge neu">⚪ Trung tính</span>`;
+
+      const authors = h.topAuthors.length > 0 ? h.topAuthors.map((a) => `@${escapeHtml(a)}`).join(", ") : "—";
+
+      return `
+      <tr class="hashtag-tr" style="animation-delay:${Math.min(i * 20, 250)}ms">
+        <td class="col-hashtag">
+          <a class="hashtag-link-badge" href="/?search=${encodeURIComponent(h.tag)}${activeTopic ? `&topic=${encodeURIComponent(activeTopic)}` : ""}" title="Xem các bài viết chứa ${escapeHtml(h.tag)}">
+            <span class="hash-symbol">#</span>${escapeHtml(h.cleanTag)}
+          </a>
+        </td>
+        <td class="col-status">${statusBadge}</td>
+        <td class="col-posts">
+          <strong>${h.totalPosts.toLocaleString("vi-VN")}</strong> bài
+        </td>
+        <td class="col-sentiment">
+          <div class="mini-feelbar-wrap" title="Tốt: ${h.positivePosts} (${h.posPct}%) · Xấu: ${h.negativePosts} (${h.negPct}%) · Trung tính: ${h.neutralPosts} (${h.neuPct}%)">
+            <div class="mini-feelbar-track">
+              <div class="mini-bar-pos" style="width:${h.posPct}%"></div>
+              <div class="mini-bar-neg" style="width:${h.negPct}%"></div>
+              <div class="mini-bar-neu" style="width:${h.neuPct}%"></div>
+            </div>
+            <div class="mini-feelbar-labels">
+              <span class="lbl-pos">${h.posPct}%</span>
+              <span class="lbl-neg">${h.negPct}%</span>
+              <span class="lbl-neu">${h.neuPct}%</span>
+            </div>
+          </div>
+        </td>
+        <td class="col-engagement">❤️ ${h.engagement.toLocaleString("vi-VN")}</td>
+        <td class="col-authors">${authors}</td>
+        <td class="col-actions">
+          <div class="hashtag-action-btns">
+            <a class="btn btn-xs btn-outline" href="/?search=${encodeURIComponent(h.tag)}${activeTopic ? `&topic=${encodeURIComponent(activeTopic)}` : ""}">🔍 Xem tin</a>
+            <form method="post" action="/topics" style="display:inline-block;">
+              <input type="hidden" name="name" value="Theo dõi ${escapeHtml(h.tag)}" />
+              <input type="hidden" name="source" value="x" />
+              <input type="hidden" name="query" value="${escapeHtml(h.tag)}" />
+              <button class="btn btn-xs btn-primary" type="submit" title="Tạo tần số lắng nghe riêng cho hashtag này">+ Tần số</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+    `;
+    })
+    .join("");
+
+  return layout(
+    "Phân tích Hashtags & Từ khóa",
+    `
+    <header class="deck-top-bar">
+      <div class="deck-top-left">
+        <div class="brand-row">
+          <span class="live-dot"><i class="pulse"></i></span>
+          <span class="brand-title">xListening</span>
+          <span class="env-badge">Hashtag Intelligence</span>
+        </div>
+        <p class="brand-desc">Lắng nghe, đo lường và dự báo rủi ro theo Từ khóa & Hashtags đa nền tảng</p>
+      </div>
+      <div class="deck-top-right">
+        <nav class="deck-nav">
+          <a class="nav-btn" href="/">Bàn nghe</a>
+          <a class="nav-btn" href="/brief">Bản tin AI</a>
+          <a class="nav-btn active" href="/hashtags">Hashtags & Từ khóa</a>
+          <a class="nav-btn" href="/compare">So tần số</a>
+          <a class="nav-btn" href="/settings">Cài đặt kết nối</a>
+        </nav>
+        <div class="top-actions">
+          <form method="post" action="/listen">
+            <button class="btn btn-primary" type="submit">⚡ Lắng nghe ngay</button>
+          </form>
+          <form method="post" action="/logout">
+            <button class="btn btn-outline" type="submit">Thoát</button>
+          </form>
+        </div>
+      </div>
+    </header>
+
+    ${notice ? `<div class="deck-alert info">ℹ️ ${escapeHtml(notice)}</div>` : ""}
+
+    <!-- KHU VỰC BỘ LỌC THỜI GIAN VÀ TẦN SỐ -->
+    <section class="deck-ribbon" style="margin-bottom: 20px;">
+      <form class="ribbon-filter-bar" method="get" action="/hashtags" style="width: 100%; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+        <div class="filter-group">
+          <label style="font-size:0.82rem; font-weight:600; color:var(--ink-soft); display:flex; align-items:center; gap:6px;">
+            <span>Khung thời gian:</span>
+            <select name="days" onchange="this.form.submit()">
+              <option value="1"${days === 1 ? " selected" : ""}>24 giờ qua</option>
+              <option value="7"${days === 7 ? " selected" : ""}>7 ngày qua</option>
+              <option value="30"${days === 30 ? " selected" : ""}>30 ngày qua</option>
+            </select>
+          </label>
+
+          <label style="font-size:0.82rem; font-weight:600; color:var(--ink-soft); display:flex; align-items:center; gap:6px;">
+            <span>Tần số:</span>
+            <select name="topic" onchange="this.form.submit()">
+              <option value="">Tất cả tần số</option>
+              ${topicOptions}
+            </select>
+          </label>
+        </div>
+        <div class="ribbon-export">
+          <a class="btn btn-sm btn-outline" href="/api/hashtags?days=${days}${activeTopic ? `&topic=${encodeURIComponent(activeTopic)}` : ""}" target="_blank">📥 Xuất JSON</a>
+        </div>
+      </form>
+    </section>
+
+    <!-- THẺ KPI HASHTAG INTELLIGENCE -->
+    <section class="executive-radar" style="grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); margin-bottom: 22px;">
+      <div class="radar-card">
+        <span class="kpi-label">Tổng số Hashtag ghi nhận</span>
+        <strong class="kpi-val">${analytics.totalHashtagsCount.toLocaleString("vi-VN")}</strong>
+        <span class="radar-sub">Xuất hiện trong ${days} ngày qua</span>
+      </div>
+      <div class="radar-card">
+        <span class="kpi-label">🚀 Hashtag thịnh hành nhất</span>
+        <strong class="kpi-val" style="font-size:1.35rem; color:var(--moss);">${analytics.topHashtag ? escapeHtml(analytics.topHashtag.tag) : "Chưa có"}</strong>
+        <span class="radar-sub">${analytics.topHashtag ? `${analytics.topHashtag.totalPosts} bài viết · ❤️ ${analytics.topHashtag.engagement} tương tác` : "Chưa ghi nhận hashtag"}</span>
+      </div>
+      <div class="radar-card">
+        <span class="kpi-label">🚨 Điểm nóng cần chú ý</span>
+        <strong class="kpi-val" style="font-size:1.35rem; color:${analytics.riskyHashtag ? "var(--copper)" : "var(--moss)"};">${analytics.riskyHashtag ? escapeHtml(analytics.riskyHashtag.tag) : "Trạng thái bình ổn"}</strong>
+        <span class="radar-sub">${analytics.riskyHashtag ? `${analytics.riskyHashtag.negPct}% bài nghiêng xấu (${analytics.riskyHashtag.negativePosts} bài)` : "Không có hashtag rủi ro cao"}</span>
+      </div>
+      <div class="radar-card">
+        <span class="kpi-label">💬 Tổng tương tác Hashtag</span>
+        <strong class="kpi-val">${analytics.list.reduce((acc, h) => acc + h.engagement, 0).toLocaleString("vi-VN")}</strong>
+        <span class="radar-sub">Likes, Shares, Comments</span>
+      </div>
+    </section>
+
+    <!-- BẢNG MA TRẬN HASHTAG & TỪ KHÓA CHI TIẾT -->
+    <section class="hashtag-table-container">
+      <div class="hashtag-table-head">
+        <div>
+          <h3>Bảng Xếp hạng & Đánh giá Sắc thái Hashtag</h3>
+          <p class="table-sub">Phát hiện sớm các trào lưu mới, đánh giá rủi ro truyền thông và kích hoạt tần số theo dõi tự động</p>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="hashtag-table">
+          <thead>
+            <tr>
+              <th>Hashtag</th>
+              <th>Đánh giá</th>
+              <th>Thảo luận</th>
+              <th style="min-width: 140px;">Phổ cảm xúc (% Tốt / Xấu / Trung tính)</th>
+              <th>Tương tác</th>
+              <th>Tài khoản tiêu biểu</th>
+              <th style="text-align: right;">Hành động</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              rows ||
+              `<tr>
+                <td colspan="7" class="table-empty">
+                  <p>Chưa ghi nhận hashtag nào trong khung thời gian này.</p>
+                  <small>Thử chọn khung thời gian 30 ngày hoặc thêm các bài viết chứa #hashtag để phân tích.</small>
+                </td>
+              </tr>`
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+    `,
+  );
+}
+
 export function settingsPage(config: AppConfig, notice?: string): string {
   return layout(
     "Cài đặt Bàn nghe",
@@ -941,9 +1245,10 @@ export function settingsPage(config: AppConfig, notice?: string): string {
       </div>
       <div class="deck-top-right">
         <nav class="deck-nav">
-          <a class="nav-btn" href="/">Quay lại Bàn nghe</a>
+          <a class="nav-btn" href="/">Bàn nghe</a>
           <a class="nav-btn" href="/brief">Bản tin AI</a>
-          <a class="nav-btn active" href="/settings">Cài đặt</a>
+          <a class="nav-btn" href="/hashtags">Hashtags & Từ khóa</a>
+          <a class="nav-btn active" href="/settings">Cài đặt kết nối</a>
         </nav>
         <form method="post" action="/logout"><button class="btn btn-outline" type="submit">Thoát</button></form>
       </div>
@@ -1578,6 +1883,164 @@ function layout(title: string, body: string): string {
       margin-bottom: 6px;
     }
 
+    /* Word Cloud & Topic Clusters */
+    .radar-cloud-card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px 20px;
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .cloud-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      border-bottom: 1px solid var(--line-subtle);
+      padding-bottom: 12px;
+    }
+    .cloud-card-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .cloud-card-title h3 {
+      margin: 0;
+      font-size: 0.96rem;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .cloud-icon { font-size: 1.2rem; }
+    .cloud-sub {
+      font-size: 0.78rem;
+      color: var(--muted);
+      display: block;
+      margin-top: 2px;
+    }
+    .cloud-clusters-tray {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .cloud-cluster-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 500;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      color: var(--ink-soft);
+      transition: all 0.15s ease;
+    }
+    .cloud-cluster-badge:hover {
+      border-color: var(--moss);
+      background: #f0fdf4;
+      color: var(--moss);
+      transform: translateY(-1px);
+    }
+    .cloud-cluster-badge.positive {
+      border-color: #bbf7d0;
+      background: #f0fdf4;
+      color: #15803d;
+    }
+    .cloud-cluster-badge.negative {
+      border-color: #fecaca;
+      background: #fef2f2;
+      color: #b91c1c;
+    }
+    .cluster-num {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.72rem;
+      opacity: 0.85;
+      background: rgba(0,0,0,0.06);
+      padding: 1px 5px;
+      border-radius: 6px;
+    }
+    .cloud-words-wrapper {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      align-items: center;
+      justify-content: flex-start;
+      min-height: 60px;
+      padding: 4px 0;
+    }
+    .cloud-word-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-weight: 500;
+      line-height: 1.2;
+      transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .cloud-word-chip:hover {
+      transform: scale(1.06);
+      box-shadow: var(--shadow-sm);
+    }
+    .cloud-word-chip.positive {
+      background: #f0fdf4;
+      color: #166534;
+      border: 1px solid #bbf7d0;
+    }
+    .cloud-word-chip.negative {
+      background: #fef2f2;
+      color: #991b1b;
+      border: 1px solid #fecaca;
+    }
+    .cloud-word-chip.neutral {
+      background: #f8fafc;
+      color: #334155;
+      border: 1px solid #e2e8f0;
+    }
+    .chip-count {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.72em;
+      opacity: 0.75;
+      background: rgba(0,0,0,0.07);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+    .empty-cloud {
+      color: var(--muted);
+      font-size: 0.84rem;
+      margin: 0;
+    }
+    .btn-ai-dispatch {
+      background: linear-gradient(135deg, #15803d, #047857);
+      border-color: #047857;
+      color: #fff !important;
+      font-weight: 600;
+      box-shadow: 0 1px 3px rgba(4, 120, 87, 0.3);
+    }
+    .btn-ai-dispatch:hover {
+      background: linear-gradient(135deg, #166534, #065f46);
+    }
+    .btn-ai-tag {
+      font-size: 0.72rem !important;
+      padding: 3px 6px !important;
+      background: #eff6ff !important;
+      color: #1d4ed8 !important;
+      border-color: #bfdbfe !important;
+      font-weight: 600;
+    }
+    .btn-ai-tag:hover {
+      background: #dbeafe !important;
+      border-color: #93c5fd !important;
+    }
+
     /* KHU VỰC 2: RIBBON FILTER BAR */
     .deck-ribbon {
       background: var(--card);
@@ -1991,18 +2454,23 @@ function layout(title: string, body: string): string {
       margin-bottom: 8px;
     }
 
-    /* KHU VỰC 4: BẢNG ĐIỀU KHIỂN & CẤU HÌNH (ACCORDION / DETAILS) */
+    /* BẢNG ĐIỀU KHIỂN & CẤU HÌNH (ACCORDION / DETAILS) */
     .deck-admin-details {
       background: var(--card);
       border: 1px solid var(--line);
       border-radius: 12px;
       overflow: hidden;
       box-shadow: var(--shadow-sm);
-      margin-top: 24px;
+      margin-bottom: 22px;
+      transition: box-shadow 0.2s ease, border-color 0.2s ease;
+    }
+    .deck-admin-details[open] {
+      box-shadow: var(--shadow-md);
+      border-color: #cbd5e1;
     }
     .deck-admin-summary {
       padding: 14px 20px;
-      background: #f5efe6;
+      background: #f8fafc;
       font-weight: 600;
       font-size: 0.95rem;
       color: var(--ink);
@@ -2011,13 +2479,56 @@ function layout(title: string, body: string): string {
       justify-content: space-between;
       align-items: center;
       user-select: none;
+      transition: background 0.15s ease;
     }
     .deck-admin-summary:hover {
-      background: #efe7dc;
+      background: #f1f5f9;
+    }
+    .admin-summary-content {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .admin-summary-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--ink);
+      font-size: 0.94rem;
+    }
+    .admin-gear-icon {
+      font-size: 1.15rem;
+    }
+    .admin-summary-badges {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .admin-pill {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.74rem;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      padding: 2px 8px;
+      border-radius: 999px;
+      color: var(--ink-soft);
+      font-weight: 500;
+    }
+    .admin-pill-action {
+      font-size: 0.74rem;
+      color: var(--moss);
+      font-weight: 600;
+      text-decoration: underline;
     }
     .summary-arrow {
       font-size: 1.1rem;
       color: var(--muted);
+      transition: transform 0.2s ease;
+    }
+    .deck-admin-details[open] .summary-arrow {
+      transform: rotate(180deg);
     }
     .deck-admin-grid {
       display: grid;
@@ -2424,6 +2935,128 @@ function layout(title: string, body: string): string {
       border-radius: 6px;
       font-size: 0.84rem;
       margin-bottom: 14px;
+    }
+
+    /* HASHTAG & KEYWORD ANALYTICS TABLE */
+    .hashtag-table-container {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 24px;
+    }
+    .hashtag-table-head {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--line-subtle);
+      background: #faf6f0;
+    }
+    .hashtag-table-head h3 {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .table-sub {
+      margin: 4px 0 0;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .hashtag-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+    }
+    .hashtag-table th {
+      text-align: left;
+      padding: 12px 16px;
+      background: var(--bg);
+      font-weight: 600;
+      font-size: 0.78rem;
+      color: var(--muted);
+      border-bottom: 1px solid var(--line);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .hashtag-table td {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line-subtle);
+      vertical-align: middle;
+    }
+    .hashtag-tr:hover {
+      background: #faf7f2;
+    }
+    .hashtag-link-badge {
+      font-family: "IBM Plex Mono", monospace;
+      font-weight: 600;
+      font-size: 0.94rem;
+      color: #0284c7;
+      background: #f0f9ff;
+      border: 1px solid #bae6fd;
+      padding: 4px 10px;
+      border-radius: 8px;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      transition: all 0.15s ease;
+    }
+    .hashtag-link-badge:hover {
+      background: #e0f2fe;
+      border-color: #7dd3fc;
+      transform: translateY(-1px);
+    }
+    .hash-symbol {
+      opacity: 0.6;
+      font-weight: 400;
+    }
+    .tag-status-badge {
+      display: inline-flex;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 0.74rem;
+      font-weight: 600;
+    }
+    .tag-status-badge.pos { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+    .tag-status-badge.warning { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+    .tag-status-badge.neu { background: #f8fafc; color: #475569; border: 1px solid #e2e8f0; }
+    .mini-feelbar-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      width: 100%;
+      max-width: 180px;
+    }
+    .mini-feelbar-track {
+      display: flex;
+      height: 6px;
+      border-radius: 999px;
+      background: #e5ded5;
+      overflow: hidden;
+    }
+    .mini-bar-pos { background: var(--moss); }
+    .mini-bar-neg { background: var(--copper); }
+    .mini-bar-neu { background: #a8a29e; }
+    .mini-feelbar-labels {
+      display: flex;
+      justify-content: space-between;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.7rem;
+      color: var(--muted);
+    }
+    .lbl-pos { color: var(--moss); font-weight: 600; }
+    .lbl-neg { color: var(--copper); font-weight: 600; }
+    .lbl-neu { color: #78716c; }
+    .hashtag-action-btns {
+      display: flex;
+      gap: 6px;
+      justify-content: flex-end;
+      align-items: center;
+    }
+    .table-empty {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--muted);
     }
 
     /* RESPONSIVE */

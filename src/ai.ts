@@ -1,4 +1,5 @@
 import type { DigestPost } from "./digest.js";
+import { CLUSTERS_DEF } from "./cloud.js";
 
 export type AiOptions = {
   apiKey: string;
@@ -12,6 +13,12 @@ export type AiSentimentResult = {
   score: number;
   isSarcastic: boolean;
   explanation: string;
+};
+
+export type AutoClassificationResult = {
+  tag: string;
+  assignedTo: string;
+  reason: string;
 };
 
 async function callChatCompletions(
@@ -178,4 +185,85 @@ Phân tích bài viết được cung cấp và trả về DUY NHẤT một chu�
     return null;
   }
 }
+
+export function classifyMentionRuleBased(text: string): AutoClassificationResult {
+  const lower = text.toLowerCase();
+  let bestCluster: (typeof CLUSTERS_DEF)[number] | null = null;
+  let maxScore = 0;
+
+  for (const c of CLUSTERS_DEF) {
+    let score = 0;
+    for (const kw of c.keywords) {
+      if (lower.includes(kw)) {
+        score += kw.includes(" ") ? 3 : 1;
+      }
+    }
+    if (score > maxScore) {
+      maxScore = score;
+      bestCluster = c;
+    }
+  }
+
+  if (bestCluster && maxScore > 0) {
+    return {
+      tag: bestCluster.tag,
+      assignedTo: bestCluster.assignee,
+      reason: `Khớp chủ đề ${bestCluster.name} qua từ khóa`,
+    };
+  }
+
+  return {
+    tag: "Chung",
+    assignedTo: "@CSKH",
+    reason: "Thảo luận chung chưa phân loại cụ thể",
+  };
+}
+
+export async function classifyMentionWithAi(
+  text: string,
+  options?: AiOptions,
+): Promise<AutoClassificationResult> {
+  // Nếu không có LLM API key, dùng rule-based tức thì
+  if (!options || !options.apiKey.trim()) {
+    return classifyMentionRuleBased(text);
+  }
+
+  const tagList = CLUSTERS_DEF.map((c) => `"${c.tag}" (${c.name} -> gán ${c.assignee})`).join(", ");
+
+  const systemPrompt = `Bạn là Trợ lý AI Phân loại & Điều phối Yêu cầu Dư luận mạng xã hội (Customer Care & Crisis Dispatcher).
+Nhiệm vụ của bạn là đọc bài viết và phân loại chính xác vào 1 trong các nhóm chủ đề:
+${tagList}, hoặc "Chung" (@CSKH).
+
+Trả về DUY NHẤT một chuỗi JSON chuẩn có cấu trúc:
+{
+  "tag": "Giao hàng" | "Dịch vụ" | "Sản phẩm" | "Giá cả" | "Khen ngợi" | "Truyền thông" | "Chung",
+  "assignedTo": "@VanHanh" | "@CSKH" | "@KyThuat" | "@KinhDoanh" | "@PR",
+  "reason": "lý do ngắn gọn 1 câu"
+}`;
+
+  try {
+    const raw = await callChatCompletions(
+      [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: text.slice(0, 1000) },
+      ],
+      options,
+      true,
+    );
+
+    const parsed = JSON.parse(raw) as Partial<AutoClassificationResult>;
+    const tag = typeof parsed.tag === "string" && parsed.tag.trim() ? parsed.tag.trim() : "";
+    const assignedTo = typeof parsed.assignedTo === "string" && parsed.assignedTo.trim() ? parsed.assignedTo.trim() : "";
+    const reason = typeof parsed.reason === "string" ? parsed.reason.slice(0, 200) : "";
+
+    if (tag && assignedTo) {
+      return { tag, assignedTo, reason };
+    }
+  } catch {
+    // Fallback sang rule-based khi LLM có sự cố
+  }
+
+  return classifyMentionRuleBased(text);
+}
+
 

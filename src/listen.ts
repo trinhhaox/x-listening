@@ -1,10 +1,11 @@
-import { listPagePosts } from "./facebook.js";
+import { listPagePosts, pageKey } from "./facebook.js";
 import { buildSearchQuery } from "./query.js";
 import { searchRecentPosts } from "./xapi.js";
-import { listThreadsPosts } from "./threads.js";
+import { listThreadsPosts, threadsUserKey } from "./threads.js";
 import { searchYoutubeVideos } from "./youtube.js";
 import { searchXWithCookie } from "./xcookie.js";
 import { scrapeFacebookPageWithCookie } from "./fbcookie.js";
+import { searchFacebookPublic, searchThreadsPublic, searchWebNews, type SocialSearchResult } from "./social_search.js";
 import type { Store, Topic } from "./db.js";
 import { muteKey } from "./db.js";
 
@@ -42,6 +43,7 @@ export async function listenOnce(
   const fbTopics = topics.filter((topic) => topic.source === "facebook");
   const threadsTopics = topics.filter((topic) => topic.source === "threads");
   const youtubeTopics = topics.filter((topic) => topic.source === "youtube");
+  const webTopics = topics.filter((topic) => topic.source === "web");
   const now = options.now ?? new Date();
   const errors: string[] = [];
   let saved = 0;
@@ -53,11 +55,13 @@ export async function listenOnce(
   if (xTopics.length > 0 && !hasXAuth) {
     errors.push("Chưa có X_BEARER_TOKEN hoặc (TWITTER_AUTH_TOKEN và TWITTER_CT0) trong môi trường.");
   }
-  if (fbTopics.length > 0 && !hasFbAuth) {
-    errors.push("Chưa có FACEBOOK_ACCESS_TOKEN hoặc FACEBOOK_COOKIE trong môi trường.");
+  const hasPageTopic = fbTopics.some((t) => Boolean(pageKey(t.query)));
+  if (hasPageTopic && !hasFbAuth) {
+    errors.push("Chưa có FACEBOOK_ACCESS_TOKEN hoặc FACEBOOK_COOKIE để quét Trang Facebook.");
   }
-  if (threadsTopics.length > 0 && !options.threadsToken?.trim()) {
-    errors.push("Chưa có THREADS_ACCESS_TOKEN trong môi trường.");
+  const hasUserThreadsTopic = threadsTopics.some((t) => Boolean(threadsUserKey(t.query)));
+  if (hasUserThreadsTopic && !options.threadsToken?.trim()) {
+    errors.push("Chưa có THREADS_ACCESS_TOKEN để quét tài khoản Threads.");
   }
   if (youtubeTopics.length > 0 && !options.youtubeApiKey?.trim()) {
     errors.push("Chưa có YOUTUBE_API_KEY trong môi trường.");
@@ -90,17 +94,29 @@ export async function listenOnce(
   }
 
   for (const topic of fbTopics) {
-    if (!hasFbAuth) continue;
     try {
+      const isFanpage = Boolean(pageKey(topic.query));
       let pulled: { saved: number; newest: string | null; incomplete: boolean };
-      if (options.facebookToken?.trim()) {
-        pulled = await pullFacebook(store, topic, muted, { ...options, facebookToken: options.facebookToken, now });
+      if (isFanpage) {
+        if (!hasFbAuth) continue;
+        if (options.facebookToken?.trim()) {
+          pulled = await pullFacebook(store, topic, muted, { ...options, facebookToken: options.facebookToken, now });
+        } else {
+          pulled = await pullFacebookWithCookie(store, topic, muted, {
+            facebookCookie: options.facebookCookie ?? "",
+            now,
+            fetchImpl: options.fetchImpl,
+          });
+        }
       } else {
-        pulled = await pullFacebookWithCookie(store, topic, muted, {
-          facebookCookie: options.facebookCookie ?? "",
+        // Lắng nghe từ khóa hoặc hashtag công khai trên Facebook
+        pulled = await pullSocialSearch(
+          store,
+          topic,
+          muted,
+          () => searchFacebookPublic(topic.query, options.maxResults, options.fetchImpl),
           now,
-          fetchImpl: options.fetchImpl,
-        });
+        );
       }
       saved += pulled.saved;
       finishTopic(store, topic, pulled, errors, now, (newest) => newerUnix(topic.since_id, newest));
@@ -110,9 +126,22 @@ export async function listenOnce(
   }
 
   for (const topic of threadsTopics) {
-    if (!options.threadsToken?.trim()) continue;
     try {
-      const pulled = await pullThreads(store, topic, muted, { ...options, threadsToken: options.threadsToken, now });
+      const isUser = Boolean(threadsUserKey(topic.query));
+      let pulled: { saved: number; newest: string | null; incomplete: boolean };
+      if (isUser) {
+        if (!options.threadsToken?.trim()) continue;
+        pulled = await pullThreads(store, topic, muted, { ...options, threadsToken: options.threadsToken, now });
+      } else {
+        // Lắng nghe từ khóa hoặc hashtag công khai trên Threads
+        pulled = await pullSocialSearch(
+          store,
+          topic,
+          muted,
+          () => searchThreadsPublic(topic.query, options.maxResults, options.fetchImpl),
+          now,
+        );
+      }
       saved += pulled.saved;
       finishTopic(store, topic, pulled, errors, now, (newest) => newerUnix(topic.since_id, newest));
     } catch (error) {
@@ -131,7 +160,56 @@ export async function listenOnce(
     }
   }
 
+  for (const topic of webTopics) {
+    try {
+      const pulled = await pullSocialSearch(
+        store,
+        topic,
+        muted,
+        () => searchWebNews(topic.query, options.maxResults, options.fetchImpl),
+        now,
+      );
+      saved += pulled.saved;
+      finishTopic(store, topic, pulled, errors, now, (newest) => newest ?? topic.since_id);
+    } catch (error) {
+      failTopic(store, topic, error, errors, now);
+    }
+  }
+
   return { saved, topics: topics.length, errors };
+}
+
+async function pullSocialSearch(
+  store: Store,
+  topic: Topic,
+  muted: Set<string>,
+  fetcher: () => Promise<SocialSearchResult[]>,
+  now: Date,
+): Promise<{ saved: number; newest: string | null; incomplete: boolean }> {
+  let saved = 0;
+  const posts = await fetcher();
+  for (const post of posts) {
+    if (muted.has(muteKey(post.authorUsername) ?? "")) continue;
+    const wrote = store.insertMention(
+      {
+        id: post.id,
+        topicId: topic.id,
+        text: post.text.slice(0, 2000),
+        authorUsername: post.authorUsername.slice(0, 32),
+        authorName: post.authorName.slice(0, 80),
+        createdAt: post.createdAt,
+        lang: post.lang,
+        likeCount: post.likeCount,
+        repostCount: post.repostCount,
+        replyCount: post.replyCount,
+        quoteCount: post.quoteCount,
+        url: post.url,
+      },
+      now.toISOString(),
+    );
+    if (wrote) saved++;
+  }
+  return { saved, newest: posts[0]?.createdAt ?? null, incomplete: false };
 }
 
 async function pullPages(

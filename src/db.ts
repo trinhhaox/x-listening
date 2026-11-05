@@ -8,6 +8,7 @@ import type { DigestPost } from "./digest.js";
 export type { AlertRule };
 import type { HitNotice } from "./notify.js";
 import { classifySentiment, type Sentiment } from "./sentiment.js";
+import { classifyMentionRuleBased } from "./ai.js";
 
 export type Topic = {
   id: string;
@@ -229,7 +230,7 @@ export class Store {
     query: string;
     excludeReposts: boolean;
     createdAt: string;
-    source?: "x" | "facebook" | "threads" | "youtube";
+    source?: "x" | "facebook" | "threads" | "youtube" | "web";
     phrase?: string;
   }): void {
     this.db
@@ -268,13 +269,14 @@ export class Store {
     const existed = Boolean(
       this.db.prepare("SELECT 1 AS ok FROM mentions WHERE id = ? AND topic_id = ?").get(mention.id, mention.topicId),
     );
+    const initialRouting = classifyMentionRuleBased(mention.text);
     const result = this.db
       .prepare(
         `INSERT INTO mentions (
            id, topic_id, text, author_username, author_name, created_at, lang,
            like_count, repost_count, reply_count, quote_count, url,
-           sentiment, sentiment_score, sample, fetched_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           sentiment, sentiment_score, sample, fetched_at, tag, assigned_to
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id, topic_id) DO UPDATE SET
            like_count = excluded.like_count,
            repost_count = excluded.repost_count,
@@ -302,6 +304,8 @@ export class Store {
         feeling.score,
         mention.sample ? 1 : 0,
         fetchedAt,
+        initialRouting.tag,
+        initialRouting.assignedTo,
       );
     if (!existed) this.recordHits(mention, feeling.sentiment, fetchedAt);
     return result.changes > 0;
@@ -381,6 +385,13 @@ export class Store {
     return this.db.prepare(sql).all(...params) as MentionRow[];
   }
 
+  getMention(topicId: string, mentionId: string): Mention | null {
+    const row = this.db
+      .prepare("SELECT * FROM mentions WHERE topic_id = ? AND id = ?")
+      .get(topicId, mentionId) as Mention | undefined;
+    return row ?? null;
+  }
+
   setMentionAssignee(topicId: string, mentionId: string, assignee: string): boolean {
     const result = this.db
       .prepare("UPDATE mentions SET assigned_to = ? WHERE topic_id = ? AND id = ?")
@@ -393,6 +404,73 @@ export class Store {
       .prepare("UPDATE mentions SET tag = ? WHERE topic_id = ? AND id = ?")
       .run(tag.slice(0, 60), topicId, mentionId);
     return result.changes > 0;
+  }
+
+  autoClassifyMention(
+    topicId: string,
+    mentionId: string,
+    classification: { tag: string; assignedTo: string },
+  ): boolean {
+    const result = this.db
+      .prepare("UPDATE mentions SET tag = ?, assigned_to = ? WHERE topic_id = ? AND id = ?")
+      .run(classification.tag.slice(0, 60), classification.assignedTo.slice(0, 60), topicId, mentionId);
+    return result.changes > 0;
+  }
+
+  listUnclassifiedMentions(limit = 100, topicId?: string): MentionRow[] {
+    let sql = `SELECT m.*, t.name AS topic_name
+               FROM mentions m
+               JOIN topics t ON t.id = m.topic_id
+               WHERE m.hidden = 0 AND ${HEARD_M} AND (m.tag = '' OR m.tag = 'Chung' OR m.assigned_to = '')`;
+    const params: (string | number)[] = [];
+    if (topicId) {
+      sql += " AND m.topic_id = ?";
+      params.push(topicId);
+    }
+    sql += ` ORDER BY m.created_at DESC LIMIT ?`;
+    params.push(limit);
+    return this.db.prepare(sql).all(...params) as MentionRow[];
+  }
+
+  listMentionsForCloud(sinceIso: string, topicId?: string): Array<{ text: string; sentiment: string }> {
+    let sql = `SELECT text, sentiment FROM mentions WHERE hidden = 0 AND ${HEARD} AND created_at >= ?`;
+    const params: string[] = [sinceIso];
+    if (topicId) {
+      sql += " AND topic_id = ?";
+      params.push(topicId);
+    }
+    return this.db.prepare(sql).all(...params) as Array<{ text: string; sentiment: string }>;
+  }
+
+  listMentionsForHashtags(
+    sinceIso: string,
+    topicId?: string,
+  ): Array<{
+    text: string;
+    sentiment: string;
+    like_count: number;
+    repost_count: number;
+    reply_count: number;
+    quote_count: number;
+    author_username: string;
+  }> {
+    let sql = `SELECT text, sentiment, like_count, repost_count, reply_count, quote_count, author_username
+               FROM mentions
+               WHERE hidden = 0 AND ${HEARD} AND created_at >= ?`;
+    const params: string[] = [sinceIso];
+    if (topicId) {
+      sql += " AND topic_id = ?";
+      params.push(topicId);
+    }
+    return this.db.prepare(sql).all(...params) as Array<{
+      text: string;
+      sentiment: string;
+      like_count: number;
+      repost_count: number;
+      reply_count: number;
+      quote_count: number;
+      author_username: string;
+    }>;
   }
 
   listTemplates(): ResponseTemplate[] {
