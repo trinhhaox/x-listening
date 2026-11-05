@@ -34,9 +34,8 @@ async function callChatCompletions(
 
     const anthropicPayload: Record<string, unknown> = {
       model,
-      max_tokens: 1024,
+      max_tokens: 2048,
       messages: userMsgs,
-      temperature: 0.3,
     };
     if (sysMsg) {
       anthropicPayload.system = sysMsg;
