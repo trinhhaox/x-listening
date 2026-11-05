@@ -1,6 +1,8 @@
 import { listPagePosts } from "./facebook.js";
 import { buildSearchQuery } from "./query.js";
 import { searchRecentPosts } from "./xapi.js";
+import { listThreadsPosts } from "./threads.js";
+import { searchYoutubeVideos } from "./youtube.js";
 import type { Store, Topic } from "./db.js";
 import { muteKey } from "./db.js";
 
@@ -17,6 +19,8 @@ export async function listenOnce(
   options: {
     token: string;
     facebookToken?: string;
+    threadsToken?: string;
+    youtubeApiKey?: string;
     maxResults: number;
     now?: Date;
     fetchImpl?: typeof fetch;
@@ -29,8 +33,10 @@ export async function listenOnce(
     return { saved: 0, topics: 0, errors: ["Không còn tần số này."] };
   }
   const topics = selected ? [selected] : store.listTopics().filter((topic) => topic.active === 1);
-  const xTopics = topics.filter((topic) => topic.source !== "facebook");
+  const xTopics = topics.filter((topic) => topic.source === "x" || (!topic.source && topic.source !== "facebook"));
   const fbTopics = topics.filter((topic) => topic.source === "facebook");
+  const threadsTopics = topics.filter((topic) => topic.source === "threads");
+  const youtubeTopics = topics.filter((topic) => topic.source === "youtube");
   const now = options.now ?? new Date();
   const errors: string[] = [];
   let saved = 0;
@@ -41,6 +47,12 @@ export async function listenOnce(
   }
   if (fbTopics.length > 0 && !options.facebookToken?.trim()) {
     errors.push("Chưa có FACEBOOK_ACCESS_TOKEN trong môi trường.");
+  }
+  if (threadsTopics.length > 0 && !options.threadsToken?.trim()) {
+    errors.push("Chưa có THREADS_ACCESS_TOKEN trong môi trường.");
+  }
+  if (youtubeTopics.length > 0 && !options.youtubeApiKey?.trim()) {
+    errors.push("Chưa có YOUTUBE_API_KEY trong môi trường.");
   }
 
   for (const topic of xTopics) {
@@ -64,6 +76,28 @@ export async function listenOnce(
       const pulled = await pullFacebook(store, topic, muted, { ...options, facebookToken: options.facebookToken, now });
       saved += pulled.saved;
       finishTopic(store, topic, pulled, errors, now, (newest) => newerUnix(topic.since_id, newest));
+    } catch (error) {
+      failTopic(store, topic, error, errors, now);
+    }
+  }
+
+  for (const topic of threadsTopics) {
+    if (!options.threadsToken?.trim()) continue;
+    try {
+      const pulled = await pullThreads(store, topic, muted, { ...options, threadsToken: options.threadsToken, now });
+      saved += pulled.saved;
+      finishTopic(store, topic, pulled, errors, now, (newest) => newerUnix(topic.since_id, newest));
+    } catch (error) {
+      failTopic(store, topic, error, errors, now);
+    }
+  }
+
+  for (const topic of youtubeTopics) {
+    if (!options.youtubeApiKey?.trim()) continue;
+    try {
+      const pulled = await pullYoutube(store, topic, muted, { ...options, youtubeApiKey: options.youtubeApiKey, now });
+      saved += pulled.saved;
+      finishTopic(store, topic, pulled, errors, now, (newest) => newest ?? topic.since_id);
     } catch (error) {
       failTopic(store, topic, error, errors, now);
     }
@@ -176,6 +210,120 @@ async function pullFacebook(
     }
     if (!result.after) return { saved, newest, incomplete: false };
     after = result.after;
+  }
+
+  return { saved, newest, incomplete: true };
+}
+
+async function pullThreads(
+  store: Store,
+  topic: Topic,
+  muted: Set<string>,
+  options: {
+    threadsToken: string;
+    maxResults: number;
+    now: Date;
+    fetchImpl?: typeof fetch;
+    startTime?: string;
+  },
+): Promise<{ saved: number; newest: string | null; incomplete: boolean }> {
+  let after: string | null = null;
+  let newest: string | null = null;
+  let saved = 0;
+  const sinceUnix = options.startTime ? unixSeconds(options.startTime) : unixSince(topic.since_id);
+  const phrase = topic.phrase.trim().toLocaleLowerCase("vi");
+
+  for (let page = 0; page < PAGE_CAP; page++) {
+    const result = await listThreadsPosts(
+      options.threadsToken,
+      topic.query,
+      options.maxResults,
+      sinceUnix,
+      options.fetchImpl,
+      { after },
+    );
+    for (const post of result.posts) {
+      newest = newerUnix(newest, String(post.createdUnix));
+      if (phrase && !post.text.toLocaleLowerCase("vi").includes(phrase)) continue;
+      if (muted.has(muteKey(post.authorUsername) ?? "")) continue;
+      const wrote = store.insertMention(
+        {
+          id: post.id,
+          topicId: topic.id,
+          text: post.text.slice(0, 2000),
+          authorUsername: post.authorUsername,
+          authorName: post.authorName,
+          createdAt: post.createdAt,
+          lang: "",
+          likeCount: post.likeCount,
+          repostCount: post.repostCount,
+          replyCount: post.replyCount,
+          quoteCount: post.quoteCount,
+          url: post.url,
+        },
+        options.now.toISOString(),
+      );
+      if (wrote) saved += 1;
+    }
+    if (!result.after) return { saved, newest, incomplete: false };
+    after = result.after;
+  }
+
+  return { saved, newest, incomplete: true };
+}
+
+async function pullYoutube(
+  store: Store,
+  topic: Topic,
+  muted: Set<string>,
+  options: {
+    youtubeApiKey: string;
+    maxResults: number;
+    now: Date;
+    fetchImpl?: typeof fetch;
+    startTime?: string;
+  },
+): Promise<{ saved: number; newest: string | null; incomplete: boolean }> {
+  let pageToken: string | null = null;
+  let newest: string | null = null;
+  let saved = 0;
+  const publishedAfter = options.startTime ?? topic.since_id;
+
+  for (let page = 0; page < PAGE_CAP; page++) {
+    const result = await searchYoutubeVideos(
+      options.youtubeApiKey,
+      topic.query,
+      options.maxResults,
+      publishedAfter,
+      options.fetchImpl,
+      pageToken,
+    );
+    for (const post of result.posts) {
+      if (!newest || Date.parse(post.createdAt) > Date.parse(newest)) {
+        newest = post.createdAt;
+      }
+      if (muted.has(muteKey(post.authorUsername) ?? "")) continue;
+      const wrote = store.insertMention(
+        {
+          id: post.id,
+          topicId: topic.id,
+          text: post.text.slice(0, 2000),
+          authorUsername: post.authorUsername,
+          authorName: post.authorName,
+          createdAt: post.createdAt,
+          lang: "",
+          likeCount: post.likeCount,
+          repostCount: post.repostCount,
+          replyCount: post.replyCount,
+          quoteCount: 0,
+          url: post.url,
+        },
+        options.now.toISOString(),
+      );
+      if (wrote) saved += 1;
+    }
+    if (!result.nextPageToken) return { saved, newest, incomplete: false };
+    pageToken = result.nextPageToken;
   }
 
   return { saved, newest, incomplete: true };

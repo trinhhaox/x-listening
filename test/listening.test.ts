@@ -7,7 +7,10 @@ import { issueSession, sessionValid } from "../src/auth.js";
 import type { AppConfig } from "../src/config.js";
 import { Store } from "../src/db.js";
 import { pageKey } from "../src/facebook.js";
-import { deliverHit, webhookTarget } from "../src/notify.js";
+import { threadsUserKey } from "../src/threads.js";
+import { searchRecentPosts } from "../src/xapi.js";
+import { deliverHit, webhookTarget, buildWebhookPayload, deliverExecutiveReport } from "../src/notify.js";
+import { generateAiBrief, analyzePostWithAi } from "../src/ai.js";
 import { listenOnce, PAGE_CAP } from "../src/listen.js";
 import { buildSearchQuery } from "../src/query.js";
 import { classifySentiment } from "../src/sentiment.js";
@@ -20,10 +23,15 @@ function testConfig(): AppConfig {
     ADMIN_PASSWORD: "mat-khau-dai",
     X_BEARER_TOKEN: "",
     FACEBOOK_ACCESS_TOKEN: "",
+    THREADS_ACCESS_TOKEN: "",
+    YOUTUBE_API_KEY: "",
     LISTEN_INTERVAL_MINUTES: 15,
     SEARCH_MAX_RESULTS: 10,
     ALERT_WEBHOOK_URL: "",
     DESKTOP_NOTIFY: "0",
+    LLM_API_KEY: "",
+    LLM_BASE_URL: "https://api.openai.com/v1",
+    LLM_MODEL: "gpt-4o-mini",
   };
 }
 
@@ -293,6 +301,8 @@ test("chuông cụm từ chỉ kêu đúng tần số", () => {
     kind: "phrase" as const,
     phrase: "Cà Phê",
     min_likes: 0,
+    threshold_count: 3,
+    time_window_minutes: 60,
     active: 1,
     created_at: "2026-10-14T00:00:00.000Z",
   };
@@ -521,4 +531,615 @@ test("phiên đăng nhập hết hạn thì từ chối", () => {
   assert.equal(sessionValid(token, "mat-khau-dai", 1_000), true);
   assert.equal(sessionValid(token, "mat-khau-khac", 1_000), false);
   assert.equal(sessionValid(token, "mat-khau-dai", 1_000 + 8 * 24 * 60 * 60 * 1000), false);
+});
+
+test("listMentions lọc theo từ khóa, sắc thái, và số thích tối thiểu", () => {
+  const store = Store.open(":memory:");
+  store.insertTopic({
+    id: "t1",
+    name: "Quán cà phê",
+    query: "cafe",
+    excludeReposts: true,
+    createdAt: "2026-10-14T00:00:00.000Z",
+  });
+  store.insertMention(
+    {
+      id: "m1",
+      topicId: "t1",
+      text: "Cà phê ở đây rất tuyệt và thơm",
+      authorUsername: "tuan_anh",
+      authorName: "Tuấn Anh",
+      createdAt: "2026-10-14T01:00:00.000Z",
+      lang: "vi",
+      likeCount: 50,
+      repostCount: 0,
+      replyCount: 0,
+      quoteCount: 0,
+    },
+    "2026-10-14T01:00:00.000Z",
+  );
+  store.insertMention(
+    {
+      id: "m2",
+      topicId: "t1",
+      text: "Nhân viên phục vụ quá tệ, thất vọng",
+      authorUsername: "minh_h",
+      authorName: "Minh Hoàng",
+      createdAt: "2026-10-14T02:00:00.000Z",
+      lang: "vi",
+      likeCount: 5,
+      repostCount: 0,
+      replyCount: 0,
+      quoteCount: 0,
+    },
+    "2026-10-14T02:00:00.000Z",
+  );
+
+  const bySearch = store.listMentions({ search: "thất vọng" });
+  assert.equal(bySearch.length, 1);
+  assert.equal(bySearch[0]?.id, "m2");
+
+  const byUser = store.listMentions({ search: "tuan_anh" });
+  assert.equal(byUser.length, 1);
+  assert.equal(byUser[0]?.id, "m1");
+
+  const positiveRows = store.listMentions({ sentiment: "positive" });
+  assert.equal(positiveRows.length, 1);
+  assert.equal(positiveRows[0]?.id, "m1");
+
+  const viralRows = store.listMentions({ minLikes: 20 });
+  assert.equal(viralRows.length, 1);
+  assert.equal(viralRows[0]?.id, "m1");
+
+  store.close();
+});
+
+test("buildWebhookPayload định dạng payload đúng cho Discord, Slack và Generic", () => {
+  const hit = {
+    id: "h1",
+    alertName: "Cảnh báo khẩn",
+    reason: "Bài nghiêng xấu",
+    authorName: "Khách phàn nàn",
+    topicName: "Quán cà phê",
+    text: "Dịch vụ kém quá",
+  };
+
+  const discordPayload = buildWebhookPayload("https://discord.com/api/webhooks/123/xyz", hit) as { content: string; embeds: Array<{ title: string }> };
+  assert.match(discordPayload.content, /Cảnh báo khẩn/);
+  assert.equal(discordPayload.embeds[0]?.title, "Bài nghiêng xấu");
+
+  const slackPayload = buildWebhookPayload("https://hooks.slack.com/services/T00/B00/X00", hit) as { text: string; blocks: unknown[] };
+  assert.match(slackPayload.text, /Cảnh báo khẩn/);
+  assert.ok(Array.isArray(slackPayload.blocks));
+
+  const genericPayload = buildWebhookPayload("https://example.com/webhook", hit) as { alert: string; reason: string };
+  assert.equal(genericPayload.alert, "Cảnh báo khẩn");
+  assert.equal(genericPayload.reason, "Bài nghiêng xấu");
+});
+
+test("API Ingest /api/mentions lưu bài từ bên ngoài và kiểm tra quyền", async () => {
+  const store = Store.open(":memory:");
+  store.insertTopic({
+    id: "t1",
+    name: "Quán cà phê",
+    query: "cafe",
+    excludeReposts: true,
+    createdAt: "2026-10-14T00:00:00.000Z",
+  });
+  const { app } = createApp(testConfig(), store);
+
+  const unauth = await app.request("/api/mentions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ topicId: "t1", text: "Bài thử", authorUsername: "user1" }),
+  });
+  assert.equal(unauth.status, 401);
+
+  const success = await app.request("/api/mentions", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: "Bearer mat-khau-dai",
+    },
+    body: JSON.stringify({
+      topicId: "t1",
+      text: "Dịch vụ ở đây quá tuyệt vời, rất hài lòng",
+      authorUsername: "tester",
+      authorName: "Người Thử Nghiệm",
+      likeCount: 15,
+      url: "https://tiktok.com/@tester/video/123",
+    }),
+  });
+  assert.equal(success.status, 200);
+  const json = (await success.json()) as { ok: boolean; id: string; inserted: boolean };
+  assert.equal(json.ok, true);
+  assert.equal(json.inserted, true);
+
+  const rows = store.listMentions();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.author_username, "tester");
+  assert.equal(rows[0]?.sentiment, "positive");
+  assert.equal(rows[0]?.like_count, 15);
+  assert.equal(rows[0]?.url, "https://tiktok.com/@tester/video/123");
+
+  store.close();
+});
+
+test("chuông bùng nổ bài tiêu cực (velocity) chỉ kêu khi đủ ngưỡng trong khung giờ", () => {
+  const store = Store.open(":memory:");
+  store.insertTopic({
+    id: "t1",
+    name: "Quán cà phê",
+    query: "cafe",
+    excludeReposts: true,
+    createdAt: "2026-10-14T00:00:00.000Z",
+  });
+
+  store.insertAlert({
+    id: "v1",
+    topicId: "t1",
+    name: "Cảnh báo khủng hoảng",
+    kind: "velocity",
+    phrase: "",
+    minLikes: 0,
+    thresholdCount: 3,
+    timeWindowMinutes: 60,
+    createdAt: "2026-10-14T01:00:00.000Z",
+  });
+
+  const now = new Date();
+  const t1 = new Date(now.getTime() - 20 * 60 * 1000).toISOString();
+  const t2 = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
+  const t3 = new Date(now.getTime() - 2 * 60 * 1000).toISOString();
+
+  store.insertMention({
+    id: "m1",
+    topicId: "t1",
+    text: "Phục vụ quá tệ",
+    authorUsername: "u1",
+    authorName: "User 1",
+    createdAt: t1,
+    lang: "vi",
+    likeCount: 0,
+    repostCount: 0,
+    replyCount: 0,
+    quoteCount: 0,
+  }, t1);
+  assert.equal(store.listOpenHits().length, 0);
+
+  store.insertMention({
+    id: "m2",
+    topicId: "t1",
+    text: "Cà phê dở, thất vọng",
+    authorUsername: "u2",
+    authorName: "User 2",
+    createdAt: t2,
+    lang: "vi",
+    likeCount: 0,
+    repostCount: 0,
+    replyCount: 0,
+    quoteCount: 0,
+  }, t2);
+  assert.equal(store.listOpenHits().length, 0);
+
+  store.insertMention({
+    id: "m3",
+    topicId: "t1",
+    text: "Chất lượng kém và lừa đảo",
+    authorUsername: "u3",
+    authorName: "User 3",
+    createdAt: t3,
+    lang: "vi",
+    likeCount: 0,
+    repostCount: 0,
+    replyCount: 0,
+    quoteCount: 0,
+  }, t3);
+
+  const hits = store.listOpenHits();
+  assert.equal(hits.length, 1);
+  assert.match(hits[0]?.reason ?? "", /Bùng nổ: 3 bài nghiêng xấu trong 60 phút/);
+
+  store.close();
+});
+
+test("AI generateAiBrief và analyzePostWithAi phân tích thành công với mock fetch", async () => {
+  const mockFetch: typeof fetch = async (input, init) => {
+    const url = String(input);
+    assert.match(url, /\/chat\/completions/);
+    const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }> };
+    
+    if (body.messages[0]?.content.includes("DUY NHẤT một chuỗi JSON")) {
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  sentiment: "negative",
+                  score: -85,
+                  isSarcastic: true,
+                  explanation: "Người dùng mỉa mai chất lượng dịch vụ quá kém",
+                }),
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: "### Tóm tắt Điều hành\n- Dư luận hôm nay có xu hướng tiêu cực về thời gian giao hàng.",
+            },
+          },
+        ],
+      }),
+      { status: 200 },
+    );
+  };
+
+  const briefText = await generateAiBrief(
+    [
+      {
+        id: "1",
+        topicId: "t1",
+        topicName: "Quán",
+        text: "Giao trễ quá thất vọng",
+        authorUsername: "lan",
+        authorName: "Lan",
+        createdAt: new Date().toISOString(),
+        sentiment: "negative",
+        starred: 0,
+      },
+    ],
+    {
+      apiKey: "test-key",
+      fetchImpl: mockFetch,
+    },
+  );
+  assert.match(briefText, /Tóm tắt Điều hành/);
+
+  const postAnalysis = await analyzePostWithAi("Quán làm ăn tuyệt vời ghê, đợi 2 tiếng chưa có đồ", {
+    apiKey: "test-key",
+    fetchImpl: mockFetch,
+  });
+  assert.ok(postAnalysis);
+  assert.equal(postAnalysis.sentiment, "negative");
+  assert.equal(postAnalysis.isSarcastic, true);
+  assert.match(postAnalysis.explanation, /mỉa mai/);
+});
+
+test("API POST /api/ai/analyze phản hồi đúng cấu trúc", async () => {
+  const store = Store.open(":memory:");
+  const config = {
+    ...testConfig(),
+    LLM_API_KEY: "test-key",
+  };
+  const { app } = createApp(config, store);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                sentiment: "positive",
+                score: 90,
+                isSarcastic: false,
+                explanation: "Khen ngợi đồ uống rất ngon",
+              }),
+            },
+          },
+        ],
+      }),
+      { status: 200 },
+    );
+
+  try {
+    const res = await app.request("/api/ai/analyze", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer mat-khau-dai",
+      },
+      body: JSON.stringify({ text: "Cà phê ở đây ngon xuất sắc" }),
+    });
+
+    assert.equal(res.status, 200);
+    const json = (await res.json()) as { ok: boolean; data: { sentiment: string; score: number } };
+    assert.equal(json.ok, true);
+    assert.equal(json.data.sentiment, "positive");
+    assert.equal(json.data.score, 90);
+  } finally {
+    globalThis.fetch = originalFetch;
+    store.close();
+  }
+});
+
+test("threadsUserKey nhận link hoặc username Threads hợp lệ", () => {
+  assert.equal(threadsUserKey("https://www.threads.net/@vietnam_coffee/post/123"), "vietnam_coffee");
+  assert.equal(threadsUserKey("@trinhhao"), "trinhhao");
+  assert.equal(threadsUserKey("brand.official"), "brand.official");
+  assert.equal(threadsUserKey("https://facebook.com/trang"), null);
+});
+
+test("searchRecentPosts báo lỗi rõ ràng khi gặp Rate Limit 429", async () => {
+  const fetch429: typeof fetch = async () =>
+    new Response(JSON.stringify({ title: "Too Many Requests" }), {
+      status: 429,
+      headers: { "x-rate-limit-reset": "1770000000" },
+    });
+
+  await assert.rejects(
+    () => searchRecentPosts("token", "query", 10, null, fetch429),
+    /Rate Limit 429/,
+  );
+});
+
+test("nghe Threads ghi bài và ghi nhớ mốc", async () => {
+  const store = Store.open(":memory:");
+  store.insertTopic({
+    id: "th1",
+    name: "Quán Threads",
+    query: "quan_cafe",
+    source: "threads",
+    phrase: "giấy",
+    excludeReposts: false,
+    createdAt: "2026-10-14T00:00:00.000Z",
+  });
+
+  const fetchThreads: typeof fetch = async () =>
+    new Response(
+      JSON.stringify({
+        data: [
+          {
+            id: "th_post_1",
+            text: "Cà phê giấy hôm nay có khuyến mãi",
+            timestamp: "2026-10-14T05:00:00+0000",
+            username: "quan_cafe",
+            permalink: "https://www.threads.net/@quan_cafe/post/th_post_1",
+          },
+          {
+            id: "th_post_2",
+            text: "Trà sữa hôm nay ngon tuyệt",
+            timestamp: "2026-10-14T04:00:00+0000",
+            username: "quan_cafe",
+          },
+        ],
+      }),
+      { status: 200 },
+    );
+
+  const report = await listenOnce(store, {
+    token: "",
+    threadsToken: "threads-token",
+    maxResults: 10,
+    fetchImpl: fetchThreads,
+  });
+
+  assert.equal(report.errors.length, 0);
+  assert.equal(report.saved, 1);
+  const row = store.listMentions()[0];
+  assert.equal(row?.id, "th_post_1");
+  assert.equal(row?.author_username, "quan_cafe");
+  assert.equal(row?.url, "https://www.threads.net/@quan_cafe/post/th_post_1");
+
+  store.close();
+});
+
+test("nghe YouTube ghi video theo từ khóa tìm kiếm", async () => {
+  const store = Store.open(":memory:");
+  store.insertTopic({
+    id: "yt1",
+    name: "Review Cà Phê",
+    query: "review cà phê giấy",
+    source: "youtube",
+    phrase: "",
+    excludeReposts: false,
+    createdAt: "2026-10-14T00:00:00.000Z",
+  });
+
+  const fetchYoutube: typeof fetch = async () =>
+    new Response(
+      JSON.stringify({
+        items: [
+          {
+            id: { videoId: "yt_123" },
+            snippet: {
+              title: "Review Cà phê giấy siêu ngon",
+              description: "Trải nghiệm cà phê giấy đặc biệt tại Sài Gòn",
+              channelTitle: "Food Reviewer",
+              channelId: "UC_123",
+              publishedAt: "2026-10-14T06:00:00Z",
+            },
+          },
+        ],
+      }),
+      { status: 200 },
+    );
+
+  const report = await listenOnce(store, {
+    token: "",
+    youtubeApiKey: "yt-key",
+    maxResults: 10,
+    fetchImpl: fetchYoutube,
+  });
+
+  assert.equal(report.errors.length, 0);
+  assert.equal(report.saved, 1);
+  const row = store.listMentions()[0];
+  assert.equal(row?.id, "yt_123");
+  assert.equal(row?.author_name, "Food Reviewer");
+  assert.equal(row?.url, "https://www.youtube.com/watch?v=yt_123");
+
+  store.close();
+});
+
+test("quản lý gán người xử lý và gắn nhãn trên bài viết", () => {
+  const store = Store.open(":memory:");
+  store.insertTopic({
+    id: "t1",
+    name: "Quán",
+    query: "quan",
+    source: "x",
+    phrase: "",
+    excludeReposts: false,
+    createdAt: "2026-10-14T00:00:00.000Z",
+  });
+
+  store.insertMention(
+    {
+      id: "m1",
+      topicId: "t1",
+      text: "Cà phê bị nguội khi ship tới nơi",
+      authorUsername: "user1",
+      authorName: "User 1",
+      createdAt: "2026-10-14T01:00:00.000Z",
+      lang: "vi",
+      likeCount: 5,
+      repostCount: 0,
+      replyCount: 0,
+      quoteCount: 0,
+    },
+    "2026-10-14T01:00:00.000Z",
+  );
+
+  store.insertMention(
+    {
+      id: "m2",
+      topicId: "t1",
+      text: "Không gian quán rất thoáng mát",
+      authorUsername: "user2",
+      authorName: "User 2",
+      createdAt: "2026-10-14T02:00:00.000Z",
+      lang: "vi",
+      likeCount: 15,
+      repostCount: 0,
+      replyCount: 0,
+      quoteCount: 0,
+    },
+    "2026-10-14T02:00:00.000Z",
+  );
+
+  // Gán người và nhãn
+  store.setMentionAssignee("t1", "m1", "Tuấn CSKH");
+  store.setMentionTag("t1", "m1", "Khẩn cấp");
+
+  let rows = store.listMentions({ assignedTo: "Tuấn" });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.id, "m1");
+  assert.equal(rows[0]?.assigned_to, "Tuấn CSKH");
+  assert.equal(rows[0]?.tag, "Khẩn cấp");
+
+  rows = store.listMentions({ tag: "Khẩn" });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.id, "m1");
+
+  rows = store.listMentions({ assignedTo: "Lan" });
+  assert.equal(rows.length, 0);
+
+  store.close();
+});
+
+test("quản lý mẫu phản hồi nhanh (response templates)", () => {
+  const store = Store.open(":memory:");
+  assert.equal(store.listTemplates().length, 0);
+
+  store.insertTemplate({
+    id: "tpl_1",
+    name: "Xin lỗi chậm trễ",
+    content: "Chào bạn, quán rất tiếc về sự cố đơn hàng của bạn...",
+    createdAt: new Date().toISOString(),
+  });
+
+  const list = store.listTemplates();
+  assert.equal(list.length, 1);
+  assert.equal(list[0]?.name, "Xin lỗi chậm trễ");
+  assert.match(list[0]?.content ?? "", /quán rất tiếc/);
+
+  store.deleteTemplate("tpl_1");
+  assert.equal(store.listTemplates().length, 0);
+
+  store.close();
+});
+
+test("deliverExecutiveReport gửi báo cáo điều hành tới webhook", async () => {
+  let capturedBody: any = null;
+  const mockFetch: typeof fetch = async (input, init) => {
+    capturedBody = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+
+  const reportData = {
+    day: "2026-10-14",
+    posts: 42,
+    negativeCount: 5,
+    newAuthorsCount: 8,
+    starredCount: 3,
+    aiSummary: "Tình hình dư luận ổn định, có một vài phàn nàn về đóng gói.",
+  };
+
+  // Test Discord Webhook
+  const discordErr = await deliverExecutiveReport(reportData, {
+    webhookUrl: "https://discord.com/api/webhooks/123/xyz",
+    fetchImpl: mockFetch,
+  });
+  assert.equal(discordErr, null);
+  assert.match(capturedBody.content, /Báo cáo Dư luận Điều hành ngày 14\/10\/2026/);
+  assert.equal(capturedBody.embeds.length, 1);
+  assert.equal(capturedBody.embeds[0].title, "Tóm tắt Điều hành AI");
+
+  // Test Slack Webhook
+  const slackErr = await deliverExecutiveReport(reportData, {
+    webhookUrl: "https://hooks.slack.com/services/123/xyz",
+    fetchImpl: mockFetch,
+  });
+  assert.equal(slackErr, null);
+  assert.match(capturedBody.text, /Báo cáo Dư luận Điều hành ngày 14\/10\/2026/);
+  assert.ok(capturedBody.blocks.length >= 2);
+
+  // Test Generic Webhook
+  const genericErr = await deliverExecutiveReport(reportData, {
+    webhookUrl: "http://127.0.0.1:9999/webhook",
+    fetchImpl: mockFetch,
+  });
+  assert.equal(genericErr, null);
+  assert.equal(capturedBody.day, "2026-10-14");
+  assert.equal(capturedBody.posts, 42);
+  assert.equal(capturedBody.negative, 5);
+});
+
+test("API POST /api/reports/send gửi báo cáo thành công", async () => {
+  const store = Store.open(":memory:");
+  const config = {
+    ...testConfig(),
+    ALERT_WEBHOOK_URL: "https://discord.com/api/webhooks/test",
+  };
+  const { app } = createApp(config, store);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ ok: true }), { status: 200 });
+
+  try {
+    const res = await app.request("/api/reports/send", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer mat-khau-dai",
+      },
+    });
+
+    assert.equal(res.status, 200);
+    const json = (await res.json()) as { ok: boolean; message: string };
+    assert.equal(json.ok, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    store.close();
+  }
 });

@@ -1,4 +1,4 @@
-export type AlertKind = "negative" | "phrase" | "likes";
+export type AlertKind = "negative" | "phrase" | "likes" | "velocity";
 
 export type AlertRule = {
   id: string;
@@ -7,6 +7,8 @@ export type AlertRule = {
   kind: AlertKind;
   phrase: string;
   min_likes: number;
+  threshold_count: number;
+  time_window_minutes: number;
   active: number;
   created_at: string;
 };

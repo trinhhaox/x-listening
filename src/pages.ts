@@ -1,4 +1,4 @@
-import type { AlertHitRow, AlertRule, MentionRow, MentionView, Topic, Voice } from "./db.js";
+import type { AlertHitRow, AlertRule, MentionRow, MentionView, ResponseTemplate, Topic, Voice } from "./db.js";
 import type { Brief, DayCount } from "./digest.js";
 
 export function escapeHtml(value: string): string {
@@ -13,10 +13,18 @@ export function escapeHtml(value: string): string {
 type DashboardModel = {
   topics: Topic[];
   mentions: MentionRow[];
+  templates: ResponseTemplate[];
   activeTopic: string;
   view: MentionView;
+  search?: string;
+  sentimentFilter?: string;
+  minLikesFilter?: number;
+  assignedToFilter?: string;
+  tagFilter?: string;
   hasToken: boolean;
   hasFacebook: boolean;
+  hasThreads: boolean;
+  hasYoutube: boolean;
   notice: string;
   stats: { mentions: number; authors: number; engagement: number; positive: number; negative: number; neutral: number };
   days: { day: string; count: number }[];
@@ -59,11 +67,12 @@ export function dashboardPage(model: DashboardModel): string {
     .map((topic) => {
       const state = topic.active ? "đang nghe" : "tạm dừng";
       const error = topic.last_error ? `<p class="error">${escapeHtml(topic.last_error)}</p>` : "";
+      const sourceLabel = topic.source === "facebook" ? "Facebook" : topic.source === "threads" ? "Threads" : topic.source === "youtube" ? "YouTube" : "X";
       return `<li class="${topic.active ? "on" : "off"}">
         <div>
           <strong>${escapeHtml(topic.name)}</strong>
           <span>${state}${topic.last_listened_at ? ` · ${escapeHtml(formatWhen(topic.last_listened_at))}` : ""}</span>
-          <code>${topic.source === "facebook" ? "Facebook" : "X"} · ${escapeHtml(topic.query)}${topic.phrase ? ` · “${escapeHtml(topic.phrase)}”` : ""}</code>
+          <code>${sourceLabel} · ${escapeHtml(topic.query)}${topic.phrase ? ` · “${escapeHtml(topic.phrase)}”` : ""}</code>
           ${error}
         </div>
         <form method="post" action="/topics/${escapeHtml(topic.id)}/toggle">
@@ -79,20 +88,38 @@ export function dashboardPage(model: DashboardModel): string {
     })
     .join("");
 
-  const backFields = `<input type="hidden" name="topic" value="${escapeHtml(model.activeTopic)}" /><input type="hidden" name="view" value="${escapeHtml(model.view)}" />`;
+  const backFields = [
+    `<input type="hidden" name="topic" value="${escapeHtml(model.activeTopic)}" />`,
+    `<input type="hidden" name="view" value="${escapeHtml(model.view)}" />`,
+    model.search ? `<input type="hidden" name="search" value="${escapeHtml(model.search)}" />` : "",
+    model.sentimentFilter ? `<input type="hidden" name="sentiment" value="${escapeHtml(model.sentimentFilter)}" />` : "",
+    model.minLikesFilter ? `<input type="hidden" name="min_likes" value="${model.minLikesFilter}" />` : "",
+    model.assignedToFilter ? `<input type="hidden" name="assigned_to" value="${escapeHtml(model.assignedToFilter)}" />` : "",
+    model.tagFilter ? `<input type="hidden" name="tag" value="${escapeHtml(model.tagFilter)}" />` : "",
+  ].filter(Boolean).join("");
   const rows = model.mentions
     .map((mention, index) => {
       const username = mention.author_username;
       const href = mention.url || ( /^\d+$/.test(mention.id) ? `https://x.com/${encodeURIComponent(username)}/status/${encodeURIComponent(mention.id)}` : "");
-      const openLabel = href.includes("facebook.com") || href.includes("fb.com") ? "Mở trên Facebook" : "Mở trên X";
+      const openLabel = href.includes("facebook.com") || href.includes("fb.com")
+        ? "Mở trên Facebook"
+        : href.includes("threads.net")
+          ? "Mở trên Threads"
+          : href.includes("youtube.com") || href.includes("youtu.be")
+            ? "Mở trên YouTube"
+            : "Mở trên X";
       const action = `/mentions/${encodeURIComponent(mention.topic_id)}/${encodeURIComponent(mention.id)}`;
       const sample = mention.sample ? `<em class="stamp">Mẫu</em>` : "";
       const note = mention.note ? `<p class="note">${escapeHtml(mention.note)}</p>` : "";
+      const tagBadge = mention.tag ? `<span class="badge tag">🏷️ ${escapeHtml(mention.tag)}</span>` : "";
+      const assigneeBadge = mention.assigned_to ? `<span class="badge assignee">👤 ${escapeHtml(mention.assigned_to)}</span>` : "";
       return `<article class="${mention.starred ? "starred" : ""}" style="animation-delay:${index * 40}ms">
         <header>
           <div>
             <b>${escapeHtml(mention.author_name)}</b>
             <span>@${escapeHtml(username)}</span>
+            ${assigneeBadge}
+            ${tagBadge}
           </div>
           <time>${escapeHtml(formatWhen(mention.created_at))}</time>
         </header>
@@ -112,6 +139,20 @@ export function dashboardPage(model: DashboardModel): string {
           <form method="post" action="${action}/star">${backFields}<button class="quiet" type="submit">${mention.starred ? "Bỏ ghim" : "Ghim"}</button></form>
           <form method="post" action="${action}/hide">${backFields}<button class="quiet" type="submit">${mention.hidden ? "Hiện lại" : "Giấu"}</button></form>
           <form method="post" action="/mutes">${backFields}<input type="hidden" name="username" value="${escapeHtml(username)}" /><button class="quiet" type="submit">Tắt tiếng</button></form>
+          <form class="mini-form" method="post" action="${action}/tag">${backFields}
+            <select name="tag" onchange="this.form.submit()">
+              <option value="">🏷️ Nhãn</option>
+              <option value="Dịch vụ"${mention.tag === "Dịch vụ" ? " selected" : ""}>Dịch vụ</option>
+              <option value="Sản phẩm"${mention.tag === "Sản phẩm" ? " selected" : ""}>Sản phẩm</option>
+              <option value="Giao hàng"${mention.tag === "Giao hàng" ? " selected" : ""}>Giao hàng</option>
+              <option value="Truyền thông"${mention.tag === "Truyền thông" ? " selected" : ""}>Truyền thông</option>
+              <option value="Khác"${mention.tag === "Khác" ? " selected" : ""}>Khác</option>
+            </select>
+          </form>
+          <form class="mini-form" method="post" action="${action}/assign">${backFields}
+            <input name="assigned_to" maxlength="40" value="${escapeHtml(mention.assigned_to)}" placeholder="👤 Gán người" />
+            <button class="quiet" type="submit">Gán</button>
+          </form>
           <form class="note-form" method="post" action="${action}/note">${backFields}<input name="note" maxlength="280" value="${escapeHtml(mention.note)}" placeholder="Ghi chú nội bộ" /><button class="quiet" type="submit">Lưu chú</button></form>
         </div>
       </article>`;
@@ -135,7 +176,14 @@ export function dashboardPage(model: DashboardModel): string {
     .join("");
   const rules = model.alerts
     .map((rule) => {
-      const detail = rule.kind === "phrase" ? rule.phrase : rule.kind === "likes" ? `${rule.min_likes} thích` : "nghiêng xấu";
+      const detail =
+        rule.kind === "phrase"
+          ? rule.phrase
+          : rule.kind === "likes"
+            ? `${rule.min_likes} thích`
+            : rule.kind === "velocity"
+              ? `${rule.threshold_count || 3} bài xấu / ${rule.time_window_minutes || 60}p`
+              : "nghiêng xấu";
       return `<li class="pair"><div><strong>${escapeHtml(rule.name)}</strong><span>${escapeHtml(detail)}</span></div>
         <form method="post" action="/alerts/${escapeHtml(rule.id)}/delete">${backFields}<button class="quiet" type="submit">Gỡ</button></form></li>`;
     })
@@ -152,10 +200,26 @@ export function dashboardPage(model: DashboardModel): string {
         <form method="post" action="/mutes/${encodeURIComponent(username)}/delete">${backFields}<button class="quiet" type="submit">Bỏ tắt</button></form></li>`,
     )
     .join("");
+  const templateItems = (model.templates ?? [])
+    .map(
+      (tpl) => `<li class="pair">
+        <div>
+          <strong>${escapeHtml(tpl.name)}</strong>
+          <code>${escapeHtml(tpl.content)}</code>
+        </div>
+        <form method="post" action="/templates/${escapeHtml(tpl.id)}/delete">${backFields}<button class="quiet" type="submit">Gỡ</button></form>
+      </li>`,
+    )
+    .join("");
   const viewLink = (view: MentionView, label: string) => {
     const params = new URLSearchParams();
     if (model.activeTopic) params.set("topic", model.activeTopic);
     if (view !== "wire") params.set("view", view);
+    if (model.search) params.set("search", model.search);
+    if (model.sentimentFilter) params.set("sentiment", model.sentimentFilter);
+    if (model.minLikesFilter) params.set("min_likes", String(model.minLikesFilter));
+    if (model.tagFilter) params.set("tag", model.tagFilter);
+    if (model.assignedToFilter) params.set("assigned_to", model.assignedToFilter);
     const query = params.toString();
     return `<a class="${model.view === view ? "on" : ""}" href="/${query ? `?${query}` : ""}">${label}</a>`;
   };
@@ -201,9 +265,14 @@ export function dashboardPage(model: DashboardModel): string {
         <h2>Tần số</h2>
         <form class="add" method="post" action="/topics">
           <label>Tên gọi<input name="name" required maxlength="80" placeholder="Quán cà phê giấy" /></label>
-          <label>Mạng<select name="source"><option value="x">X</option><option value="facebook">Facebook</option></select></label>
-          <label>Câu trên X, hoặc link Trang Facebook<textarea name="query" required maxlength="300" rows="4" placeholder="&quot;cà phê giấy&quot; OR giaycafe lang:vi"></textarea></label>
-          <label>Cụm giữ lại trên Facebook<input name="phrase" maxlength="80" placeholder="Để trống thì lấy mọi bài của trang" /></label>
+          <label>Mạng<select name="source">
+            <option value="x">X</option>
+            <option value="facebook">Facebook</option>
+            <option value="threads">Threads</option>
+            <option value="youtube">YouTube</option>
+          </select></label>
+          <label>Câu tìm kiếm (X/YouTube), link Trang Facebook, hoặc @user Threads<textarea name="query" required maxlength="300" rows="3" placeholder="&quot;cà phê giấy&quot; hoặc @ten_tai_khoan"></textarea></label>
+          <label>Cụm giữ lại (cho Facebook / Threads)<input name="phrase" maxlength="80" placeholder="Để trống thì lấy mọi bài" /></label>
           <label class="check"><input type="checkbox" name="exclude_reposts" checked /> Bỏ bài đăng lại trên X</label>
           <button type="submit">Thêm tần số</button>
         </form>
@@ -215,11 +284,16 @@ export function dashboardPage(model: DashboardModel): string {
           <label>Tên<input name="name" required maxlength="80" placeholder="Bài kêu ca" /></label>
           <label>Khi nào<select name="kind">
             <option value="negative">Bài nghiêng xấu</option>
+            <option value="velocity">Bùng nổ bài tiêu cực (Velocity)</option>
             <option value="phrase">Có cụm từ</option>
             <option value="likes">Đủ lượt thích</option>
           </select></label>
-          <label>Cụm từ<input name="phrase" maxlength="80" placeholder="thất vọng" /></label>
-          <label>Số thích tối thiểu<input name="min_likes" type="number" min="1" max="1000000" value="20" /></label>
+          <label>Cụm từ (nếu chọn cụm từ)<input name="phrase" maxlength="80" placeholder="thất vọng" /></label>
+          <label>Số thích tối thiểu (nếu chọn lượt thích)<input name="min_likes" type="number" min="1" max="1000000" value="20" /></label>
+          <div style="display:flex; gap:8px">
+            <label style="flex:1">Số bài xấu (Velocity)<input name="threshold_count" type="number" min="2" max="1000" value="3" /></label>
+            <label style="flex:1">Trong (phút)<input name="time_window_minutes" type="number" min="5" max="1440" value="60" /></label>
+          </div>
           <label>Áp vào<select name="topic_id"><option value="">Mọi tần số</option>${alertTopics}</select></label>
           <button type="submit">Đặt chuông</button>
         </form>
@@ -231,6 +305,13 @@ export function dashboardPage(model: DashboardModel): string {
           <button type="submit">Thêm từ</button>
         </form>
         <ul class="topics">${lexiconList(model.lexicon, backFields) || `<li class="off"><div><strong>Chưa thêm từ</strong><span>Từ thêm được tính cùng bộ có sẵn, và ghi đè nếu trùng.</span></div></li>`}</ul>
+        <h2>Mẫu phản hồi nhanh</h2>
+        <form class="add" method="post" action="/templates">${backFields}
+          <label>Tên mẫu<input name="name" required maxlength="80" placeholder="Lời xin lỗi khách hàng" /></label>
+          <label>Nội dung mẫu<textarea name="content" required maxlength="1000" rows="3" placeholder="Chào bạn, cảm ơn bạn đã phản hồi. Chúng mình xin phép inbox..."></textarea></label>
+          <button type="submit">Thêm mẫu</button>
+        </form>
+        <ul class="topics">${templateItems || `<li class="off"><div><strong>Chưa có mẫu phản hồi</strong><span>Thêm mẫu trả lời nhanh để đội ngũ CSKH dùng ngay.</span></div></li>`}</ul>
         <h2>Đã tắt tiếng</h2>
         <ul class="topics">${muted || `<li class="off"><div><strong>Chưa tắt ai</strong><span>Tắt tiếng trên một bài để chặn bài sau của tài khoản đó.</span></div></li>`}</ul>
         <form method="post" action="/samples"><button class="quiet" type="submit">Nạp tin mẫu</button></form>
@@ -238,18 +319,43 @@ export function dashboardPage(model: DashboardModel): string {
       </aside>
       <section class="wire">
         <div class="wire-head">
-          <h2>Dây tin</h2>
-          <nav class="views">${viewLink("wire", "Dây tin")}${viewLink("new", `Mới ${model.queueNew}`)}${viewLink("reading", "Đang xử lý")}${viewLink("done", "Xong")}${viewLink("starred", "Đã ghim")}${viewLink("hidden", "Đã giấu")}</nav>
-          <form method="get" action="/">
+          <div>
+            <h2>Dây tin</h2>
+            <nav class="views">${viewLink("wire", "Dây tin")}${viewLink("new", `Mới ${model.queueNew}`)}${viewLink("reading", "Đang xử lý")}${viewLink("done", "Xong")}${viewLink("starred", "Đã ghim")}${viewLink("hidden", "Đã giấu")}</nav>
+          </div>
+          <form class="wire-filter" method="get" action="/">
             <input type="hidden" name="view" value="${escapeHtml(model.view === "wire" ? "" : model.view)}" />
-            <select name="topic" onchange="this.form.submit()">
+            <select name="topic">
               <option value="">Mọi tần số</option>
               ${topicOptions}
             </select>
+            <select name="sentiment">
+              <option value="">Mọi sắc thái</option>
+              <option value="positive"${model.sentimentFilter === "positive" ? " selected" : ""}>Nghiêng tốt</option>
+              <option value="negative"${model.sentimentFilter === "negative" ? " selected" : ""}>Nghiêng xấu</option>
+              <option value="neutral"${model.sentimentFilter === "neutral" ? " selected" : ""}>Trung tính</option>
+            </select>
+            <input class="search-input" type="search" name="search" value="${escapeHtml(model.search ?? "")}" placeholder="Tìm từ khóa, tác giả..." />
+            <input style="max-width: 100px" type="text" name="tag" value="${escapeHtml(model.tagFilter ?? "")}" placeholder="#nhãn" />
+            <input style="max-width: 110px" type="text" name="assigned_to" value="${escapeHtml(model.assignedToFilter ?? "")}" placeholder="👤 gán ai" />
+            <input style="max-width: 80px" type="number" name="min_likes" value="${model.minLikesFilter ?? ""}" min="0" placeholder="Thích &ge;" />
+            <button type="submit">Lọc</button>
+            ${model.search || model.sentimentFilter || model.minLikesFilter || model.tagFilter || model.assignedToFilter || model.activeTopic ? `<a class="quiet-link" href="/${model.view !== "wire" ? `?view=${encodeURIComponent(model.view)}` : ""}">Bỏ lọc</a>` : ""}
           </form>
-          <a href="/export.csv${model.activeTopic ? `?topic=${encodeURIComponent(model.activeTopic)}` : ""}">Tải CSV</a>
+          <div>
+            <a href="/export.csv?${(() => {
+              const p = new URLSearchParams();
+              if (model.activeTopic) p.set("topic", model.activeTopic);
+              if (model.search) p.set("search", model.search);
+              if (model.sentimentFilter) p.set("sentiment", model.sentimentFilter);
+              if (model.minLikesFilter) p.set("min_likes", String(model.minLikesFilter));
+              if (model.tagFilter) p.set("tag", model.tagFilter);
+              if (model.assignedToFilter) p.set("assigned_to", model.assignedToFilter);
+              return p.toString();
+            })()}">Tải CSV</a>
+          </div>
         </div>
-        ${rows || `<p class="empty">Chưa có tin. Thêm tần số, rồi bấm Lắng nghe ngay. Tin mẫu có dấu Mẫu và không phải bài thật.</p>`}
+        ${rows || `<p class="empty">Chưa có tin phù hợp. Thêm tần số hoặc điều chỉnh bộ lọc.</p>`}
       </section>
     </div>`,
   );
@@ -269,7 +375,7 @@ function csvCell(value: string | number): string {
   return `"${String(value).replaceAll('"', '""')}"`;
 }
 
-export function briefPage(brief: Brief): string {
+export function briefPage(brief: Brief, notice?: string): string {
   const negative = brief.negative
     .map((post) => `<li><b>@${escapeHtml(post.authorUsername)}</b> · ${escapeHtml(post.topicName)}<p>${escapeHtml(post.text)}</p></li>`)
     .join("");
@@ -288,13 +394,20 @@ export function briefPage(brief: Brief): string {
       </div>
       <a class="nav" href="/">Dây tin</a>
       <a class="nav" href="/brief.md">Tải Markdown</a>
+      <form method="post" action="/brief/send-webhook"><button type="submit">Gửi Webhook</button></form>
     </header>
+    ${notice ? `<p class="notice">${escapeHtml(notice)}</p>` : ""}
     <section class="meters">
       <div><span>bài</span><strong>${brief.posts}</strong></div>
       <div><span>nghiêng xấu</span><strong>${brief.negative.length}</strong></div>
       <div><span>người viết lần đầu</span><strong>${brief.newAuthors.length}</strong></div>
       <div><span>đang ghim</span><strong>${brief.starred.length}</strong></div>
     </section>
+    ${brief.aiSummary ? `
+    <section class="ai-box">
+      <h2>Tóm tắt Điều hành AI</h2>
+      <div class="ai-body">${escapeHtml(brief.aiSummary).replaceAll("\n", "<br />")}</div>
+    </section>` : ""}
     <h2>Nghiêng xấu</h2>
     <ul class="brief">${negative || `<li class="empty">Không có.</li>`}</ul>
     <h2>Người viết lần đầu</h2>
@@ -416,6 +529,16 @@ function layout(title: string, body: string): string {
     .kicker { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--copper); display: flex; align-items: center; gap: 8px; }
     .pulse { width: 8px; height: 8px; border-radius: 99px; background: var(--moss); display: inline-block; animation: beat 1.8s ease-in-out infinite; }
     @keyframes beat { 50% { transform: scale(0.7); opacity: 0.55; } }
+    .wire-head { margin-bottom: 12px; }
+    .wire-filter { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; margin: 12px 0 6px; }
+    .wire-filter select, .wire-filter input { width: auto; margin: 0; padding: 7px 12px; font-size: 0.88rem; border-radius: 999px; }
+    .wire-filter .search-input { flex: 1 1 180px; }
+    .wire-filter button { padding: 7px 14px; font-size: 0.88rem; }
+    .quiet-link { color: var(--muted); text-decoration: none; font-size: 0.88rem; padding: 4px 8px; }
+    .quiet-link:hover { text-decoration: underline; color: var(--ink); }
+    .ai-box { background: #fffdf9; border: 1px solid #d4c2a8; border-left: 4px solid var(--copper); padding: 18px; border-radius: 12px; margin: 20px 0; }
+    .ai-box h2 { margin-top: 0; color: var(--ink); }
+    .ai-body { line-height: 1.6; font-size: 0.98rem; color: var(--ink); }
     .top, .wire-head, .meters { display: flex; gap: 18px; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; }
     .top { margin-bottom: 22px; }
     a.nav { background: transparent; color: var(--ink); border: 1px solid var(--line); border-radius: 999px; padding: 10px 16px; text-decoration: none; }
@@ -479,6 +602,12 @@ function layout(title: string, body: string): string {
     .views a.on { background: var(--ink); color: #f6efe4; }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .actions button.current { background: var(--ink); color: #f6efe4; }
+    .mini-form { display: flex; gap: 4px; align-items: center; }
+    .mini-form select, .mini-form input { margin: 0; padding: 4px 8px; font-size: 0.82rem; border-radius: 6px; width: auto; }
+    .mini-form button { padding: 4px 8px; font-size: 0.82rem; }
+    .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 0.78rem; font-weight: 500; font-family: "IBM Plex Mono", ui-monospace, monospace; }
+    .badge.tag { background: #e8dccb; color: var(--clay); border: 1px solid var(--line); }
+    .badge.assignee { background: #d7e4dc; color: var(--moss); border: 1px solid #b7ccbf; }
     .note-form { display: flex; gap: 8px; flex: 1; min-width: min(100%, 280px); }
     .note-form input { margin: 0; }
     article .note { color: var(--clay); margin: 0; }

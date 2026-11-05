@@ -20,6 +20,7 @@ export type Brief = {
   negative: DigestPost[];
   newAuthors: { username: string; name: string; posts: number }[];
   starred: DigestPost[];
+  aiSummary?: string;
 };
 
 export function localDay(date: Date): string {
@@ -85,6 +86,7 @@ export function briefMarkdown(brief: Brief): string {
     "",
     `${brief.posts} bài. ${brief.negative.length} nghiêng xấu. ${brief.newAuthors.length} người viết lần đầu. ${brief.starred.length} bài đang ghim.`,
     "",
+    ...(brief.aiSummary ? ["## Tóm tắt Điều hành AI", "", brief.aiSummary, ""] : []),
     "## Nghiêng xấu",
     ...section(brief.negative.map((post) => `- @${post.authorUsername}: ${oneLine(post.text)}`)),
     "",

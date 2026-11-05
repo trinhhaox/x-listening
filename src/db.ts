@@ -44,10 +44,30 @@ export type Mention = {
   hidden: number;
   note: string;
   queue: QueueState;
+  assigned_to: string;
+  tag: string;
 };
 
 export type MentionView = "wire" | "new" | "reading" | "done" | "starred" | "hidden";
 export type QueueState = "new" | "reading" | "done";
+
+export type ListMentionsOptions = {
+  topicId?: string;
+  limit?: number;
+  view?: MentionView;
+  search?: string;
+  sentiment?: string;
+  minLikes?: number;
+  assignedTo?: string;
+  tag?: string;
+};
+
+export type ResponseTemplate = {
+  id: string;
+  name: string;
+  content: string;
+  created_at: string;
+};
 
 const HEARD = "lower(author_username) NOT IN (SELECT username FROM muted_authors)";
 const HEARD_M = "lower(m.author_username) NOT IN (SELECT username FROM muted_authors)";
@@ -164,15 +184,25 @@ export class Store {
         polarity TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS response_templates (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
     `);
     ensureColumn(db, "mentions", "starred", "starred INTEGER NOT NULL DEFAULT 0");
     ensureColumn(db, "mentions", "hidden", "hidden INTEGER NOT NULL DEFAULT 0");
     ensureColumn(db, "mentions", "note", "note TEXT NOT NULL DEFAULT ''");
     ensureColumn(db, "mentions", "queue", "queue TEXT NOT NULL DEFAULT 'new'");
     ensureColumn(db, "mentions", "url", "url TEXT NOT NULL DEFAULT ''");
+    ensureColumn(db, "mentions", "assigned_to", "assigned_to TEXT NOT NULL DEFAULT ''");
+    ensureColumn(db, "mentions", "tag", "tag TEXT NOT NULL DEFAULT ''");
     ensureColumn(db, "topics", "source", "source TEXT NOT NULL DEFAULT 'x'");
     ensureColumn(db, "topics", "phrase", "phrase TEXT NOT NULL DEFAULT ''");
     ensureColumn(db, "alert_hits", "notified", "notified INTEGER NOT NULL DEFAULT 1");
+    ensureColumn(db, "alerts", "threshold_count", "threshold_count INTEGER NOT NULL DEFAULT 3");
+    ensureColumn(db, "alerts", "time_window_minutes", "time_window_minutes INTEGER NOT NULL DEFAULT 60");
     return new Store(db);
   }
 
@@ -194,7 +224,7 @@ export class Store {
     query: string;
     excludeReposts: boolean;
     createdAt: string;
-    source?: "x" | "facebook";
+    source?: "x" | "facebook" | "threads" | "youtube";
     phrase?: string;
   }): void {
     this.db
@@ -272,18 +302,106 @@ export class Store {
     return result.changes > 0;
   }
 
-  listMentions(topicId?: string, limit = 80, view: MentionView = "wire"): MentionRow[] {
-    const visibility = mentionFilter(view);
-    const heard = view === "hidden" ? "1 = 1" : HEARD_M;
-    return this.db
-      .prepare(
-        `SELECT m.*, t.name AS topic_name
+  listMentions(
+    topicOrOptions?: string | ListMentionsOptions,
+    limit = 80,
+    view: MentionView = "wire",
+  ): MentionRow[] {
+    let topicId = "";
+    let actualLimit = limit;
+    let actualView: MentionView = view;
+    let search = "";
+    let sentiment = "";
+    let minLikes = 0;
+    let assignedTo = "";
+    let tag = "";
+
+    if (typeof topicOrOptions === "object" && topicOrOptions !== null) {
+      topicId = topicOrOptions.topicId ?? "";
+      actualLimit = topicOrOptions.limit ?? 80;
+      actualView = topicOrOptions.view ?? "wire";
+      search = (topicOrOptions.search ?? "").trim().toLowerCase();
+      sentiment = (topicOrOptions.sentiment ?? "").trim();
+      minLikes = Number(topicOrOptions.minLikes ?? 0);
+      assignedTo = (topicOrOptions.assignedTo ?? "").trim();
+      tag = (topicOrOptions.tag ?? "").trim();
+    } else if (typeof topicOrOptions === "string") {
+      topicId = topicOrOptions;
+    }
+
+    const visibility = mentionFilter(actualView);
+    const heard = actualView === "hidden" ? "1 = 1" : HEARD_M;
+    const conditions: string[] = [visibility, heard];
+    const params: (string | number)[] = [];
+
+    if (topicId) {
+      conditions.push("m.topic_id = ?");
+      params.push(topicId);
+    }
+
+    if (sentiment && (sentiment === "positive" || sentiment === "negative" || sentiment === "neutral")) {
+      conditions.push("m.sentiment = ?");
+      params.push(sentiment);
+    }
+
+    if (minLikes > 0) {
+      conditions.push("m.like_count >= ?");
+      params.push(minLikes);
+    }
+
+    if (assignedTo) {
+      conditions.push("lower(m.assigned_to) LIKE ?");
+      params.push(`%${assignedTo.toLowerCase()}%`);
+    }
+
+    if (tag) {
+      conditions.push("lower(m.tag) LIKE ?");
+      params.push(`%${tag.toLowerCase()}%`);
+    }
+
+    if (search) {
+      conditions.push("(lower(m.text) LIKE ? OR lower(m.author_username) LIKE ? OR lower(m.author_name) LIKE ?)");
+      const pattern = `%${search}%`;
+      params.push(pattern, pattern, pattern);
+    }
+
+    params.push(actualLimit);
+
+    const sql = `SELECT m.*, t.name AS topic_name
          FROM mentions m JOIN topics t ON t.id = m.topic_id
-         WHERE (? = '' OR m.topic_id = ?) AND ${visibility} AND ${heard}
+         WHERE ${conditions.join(" AND ")}
          ORDER BY m.created_at DESC
-         LIMIT ?`,
-      )
-      .all(topicId ?? "", topicId ?? "", limit) as MentionRow[];
+         LIMIT ?`;
+
+    return this.db.prepare(sql).all(...params) as MentionRow[];
+  }
+
+  setMentionAssignee(topicId: string, mentionId: string, assignee: string): boolean {
+    const result = this.db
+      .prepare("UPDATE mentions SET assigned_to = ? WHERE topic_id = ? AND id = ?")
+      .run(assignee.slice(0, 60), topicId, mentionId);
+    return result.changes > 0;
+  }
+
+  setMentionTag(topicId: string, mentionId: string, tag: string): boolean {
+    const result = this.db
+      .prepare("UPDATE mentions SET tag = ? WHERE topic_id = ? AND id = ?")
+      .run(tag.slice(0, 60), topicId, mentionId);
+    return result.changes > 0;
+  }
+
+  listTemplates(): ResponseTemplate[] {
+    return this.db.prepare("SELECT * FROM response_templates ORDER BY created_at DESC").all() as ResponseTemplate[];
+  }
+
+  insertTemplate(input: { id: string; name: string; content: string; createdAt: string }): void {
+    this.db
+      .prepare("INSERT INTO response_templates (id, name, content, created_at) VALUES (?, ?, ?, ?)")
+      .run(input.id, input.name.slice(0, 80), input.content.slice(0, 2000), input.createdAt);
+  }
+
+  deleteTemplate(id: string): void {
+    this.db.prepare("DELETE FROM response_templates WHERE id = ?").run(id);
   }
 
   setMentionQueue(topicId: string, mentionId: string, queue: QueueState): boolean {
@@ -443,14 +561,28 @@ export class Store {
     kind: AlertKind;
     phrase: string;
     minLikes: number;
+    thresholdCount?: number;
+    timeWindowMinutes?: number;
     createdAt: string;
   }): number {
+    const threshold = input.thresholdCount ?? (input.kind === "velocity" ? 3 : 0);
+    const windowMin = input.timeWindowMinutes ?? (input.kind === "velocity" ? 60 : 0);
     this.db
       .prepare(
-        `INSERT INTO alerts (id, topic_id, name, kind, phrase, min_likes, active, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+        `INSERT INTO alerts (id, topic_id, name, kind, phrase, min_likes, threshold_count, time_window_minutes, active, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
       )
-      .run(input.id, input.topicId, input.name, input.kind, input.phrase, input.minLikes, input.createdAt);
+      .run(
+        input.id,
+        input.topicId,
+        input.name,
+        input.kind,
+        input.phrase,
+        input.minLikes,
+        threshold,
+        windowMin,
+        input.createdAt,
+      );
     return this.scanAlert(input.id, input.createdAt);
   }
 
@@ -640,6 +772,27 @@ export class Store {
 
   private recordHits(mention: NewMention, sentiment: string, at: string): void {
     for (const rule of this.listAlerts()) {
+      if (rule.active !== 1) continue;
+      if (rule.topic_id && rule.topic_id !== mention.topicId) continue;
+
+      if (rule.kind === "velocity") {
+        if (sentiment === "negative") {
+          const windowMinutes = rule.time_window_minutes > 0 ? rule.time_window_minutes : 60;
+          const threshold = rule.threshold_count > 0 ? rule.threshold_count : 3;
+          const windowStart = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+          const countSql = rule.topic_id
+            ? `SELECT COUNT(*) AS total FROM mentions WHERE topic_id = ? AND sentiment = 'negative' AND hidden = 0 AND created_at >= ?`
+            : `SELECT COUNT(*) AS total FROM mentions WHERE sentiment = 'negative' AND hidden = 0 AND created_at >= ?`;
+          const countParams = rule.topic_id ? [rule.topic_id, windowStart] : [windowStart];
+          const row = this.db.prepare(countSql).get(...countParams) as { total: number };
+          if (row && row.total >= threshold) {
+            const reason = `Bùng nổ: ${row.total} bài nghiêng xấu trong ${windowMinutes} phút`;
+            this.insertHit(rule.id, mention.id, mention.topicId, reason, at);
+          }
+        }
+        continue;
+      }
+
       const reason = alertReason(rule, {
         topicId: mention.topicId,
         text: mention.text,
@@ -653,7 +806,30 @@ export class Store {
 
   private scanAlert(alertId: string, at: string): number {
     const rule = this.listAlerts().find((item) => item.id === alertId);
-    if (!rule) return 0;
+    if (!rule || rule.active !== 1) return 0;
+
+    if (rule.kind === "velocity") {
+      const windowMinutes = rule.time_window_minutes > 0 ? rule.time_window_minutes : 60;
+      const threshold = rule.threshold_count > 0 ? rule.threshold_count : 3;
+      const windowStart = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+      const countSql = rule.topic_id
+        ? `SELECT COUNT(*) AS total FROM mentions WHERE topic_id = ? AND sentiment = 'negative' AND hidden = 0 AND created_at >= ?`
+        : `SELECT COUNT(*) AS total FROM mentions WHERE sentiment = 'negative' AND hidden = 0 AND created_at >= ?`;
+      const countParams = rule.topic_id ? [rule.topic_id, windowStart] : [windowStart];
+      const row = this.db.prepare(countSql).get(...countParams) as { total: number };
+      if (row && row.total >= threshold) {
+        const latestSql = rule.topic_id
+          ? `SELECT id, topic_id FROM mentions WHERE topic_id = ? AND sentiment = 'negative' AND hidden = 0 ORDER BY created_at DESC LIMIT 1`
+          : `SELECT id, topic_id FROM mentions WHERE sentiment = 'negative' AND hidden = 0 ORDER BY created_at DESC LIMIT 1`;
+        const latestParams = rule.topic_id ? [rule.topic_id] : [];
+        const latest = this.db.prepare(latestSql).get(...latestParams) as { id: string; topic_id: string } | undefined;
+        if (latest && this.insertHit(rule.id, latest.id, latest.topic_id, `Bùng nổ: ${row.total} bài nghiêng xấu trong ${windowMinutes} phút`, at)) {
+          return 1;
+        }
+      }
+      return 0;
+    }
+
     const mentions = this.db.prepare(`SELECT * FROM mentions WHERE hidden = 0 AND ${HEARD}`).all() as Mention[];
     let hits = 0;
     for (const mention of mentions) {

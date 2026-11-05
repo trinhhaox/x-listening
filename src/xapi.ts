@@ -67,6 +67,15 @@ export async function searchRecentPosts(
   });
   const payload = (await response.json().catch(() => ({}))) as SearchPayload;
   if (!response.ok) {
+    if (response.status === 429) {
+      const reset = response.headers.get("x-rate-limit-reset");
+      let resetNotice = "";
+      if (reset && /^\d+$/.test(reset)) {
+        const resetDate = new Date(Number(reset) * 1000);
+        resetNotice = ` (Mở lại lúc ${resetDate.toLocaleTimeString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })})`;
+      }
+      throw new XApiError(`X giới hạn tần suất gọi (Rate Limit 429)${resetNotice}`, 429);
+    }
     const detail = payload.detail || payload.title || payload.errors?.[0]?.message || response.statusText;
     throw new XApiError(`X trả về ${response.status}: ${detail}`, response.status);
   }

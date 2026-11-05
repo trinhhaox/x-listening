@@ -26,6 +26,49 @@ export function webhookTarget(raw: string): string | null {
   return null;
 }
 
+export function buildWebhookPayload(target: string, hit: HitNotice): unknown {
+  const url = target.toLowerCase();
+  if (url.includes("discord.com/api/webhooks")) {
+    return {
+      content: `🔔 **Chuông:** ${clip(hit.alertName, 80)}`,
+      embeds: [
+        {
+          title: clip(hit.reason, 160),
+          description: clip(hit.text, 280),
+          fields: [
+            { name: "Tần số", value: clip(hit.topicName, 80), inline: true },
+            { name: "Tác giả", value: clip(hit.authorName, 80), inline: true },
+          ],
+          color: 15158332,
+        },
+      ],
+    };
+  }
+
+  if (url.includes("hooks.slack.com")) {
+    return {
+      text: `🔔 *Chuông: ${clip(hit.alertName, 80)}* - ${clip(hit.reason, 160)}`,
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `🔔 *Chuông: ${clip(hit.alertName, 80)}*\n*Lý do:* ${clip(hit.reason, 160)}\n*Tần số:* ${clip(hit.topicName, 80)} · *Tác giả:* ${clip(hit.authorName, 80)}\n>${clip(hit.text, 280)}`,
+          },
+        },
+      ],
+    };
+  }
+
+  return {
+    alert: clip(hit.alertName, 80),
+    reason: clip(hit.reason, 160),
+    author: clip(hit.authorName, 80),
+    topic: clip(hit.topicName, 80),
+    text: clip(hit.text, 280),
+  };
+}
+
 export async function deliverHit(
   hit: HitNotice,
   options: {
@@ -45,17 +88,12 @@ export async function deliverHit(
   if (!raw) return null;
   const target = webhookTarget(raw);
   if (!target) return "Webhook chuông chỉ nhận địa chỉ https, hoặc http trên máy này.";
+  const payload = buildWebhookPayload(target, hit);
   const response = await (options.fetchImpl ?? fetch)(target, {
     method: "POST",
     redirect: "error",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      alert: clip(hit.alertName, 80),
-      reason: clip(hit.reason, 160),
-      author: clip(hit.authorName, 80),
-      topic: clip(hit.topicName, 80),
-      text: clip(hit.text, 280),
-    }),
+    body: JSON.stringify(payload),
     signal: AbortSignal.timeout(4000),
   });
   if (!response.ok) return `Webhook chuông trả về ${response.status}.`;
@@ -69,4 +107,100 @@ function desktopNotify(title: string, body: string): void {
 
 function clip(value: string, max: number): string {
   return value.replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+export type ExecutiveReportData = {
+  day: string;
+  posts: number;
+  negativeCount?: number;
+  newAuthorsCount?: number;
+  starredCount?: number;
+  negative?: unknown[];
+  newAuthors?: unknown[];
+  starred?: unknown[];
+  aiSummary?: string;
+};
+
+export async function deliverExecutiveReport(
+  brief: ExecutiveReportData,
+  options:
+    | {
+        webhookUrl: string;
+        fetchImpl?: typeof fetch;
+      }
+    | string,
+): Promise<string | null> {
+  const opts = typeof options === "string" ? { webhookUrl: options } : options;
+  const raw = opts.webhookUrl.trim();
+  if (!raw) return "Chưa cấu hình ALERT_WEBHOOK_URL";
+  const target = webhookTarget(raw);
+  if (!target) return "Webhook chỉ nhận địa chỉ https, hoặc http trên máy này.";
+
+  const negCount = brief.negativeCount ?? brief.negative?.length ?? 0;
+  const newAuthCount = brief.newAuthorsCount ?? brief.newAuthors?.length ?? 0;
+  const starCount = brief.starredCount ?? brief.starred?.length ?? 0;
+
+  const dayFormatted = brief.day.split("-").reverse().join("/");
+  const statsSummary = `${brief.posts} bài · ${negCount} nghiêng xấu · ${newAuthCount} người mới · ${starCount} ghim`;
+  const url = target.toLowerCase();
+
+  let payload: unknown;
+  if (url.includes("discord.com/api/webhooks")) {
+    payload = {
+      content: `📊 **Báo cáo Dư luận Điều hành ngày ${dayFormatted}**\n${statsSummary}`,
+      embeds: brief.aiSummary
+        ? [
+            {
+              title: "Tóm tắt Điều hành AI",
+              description: clip(brief.aiSummary, 1500),
+              color: 3447003,
+            },
+          ]
+        : [],
+    };
+  } else if (url.includes("hooks.slack.com")) {
+    payload = {
+      text: `📊 *Báo cáo Dư luận Điều hành ngày ${dayFormatted}* - ${statsSummary}`,
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `📊 *Báo cáo Dư luận Điều hành ngày ${dayFormatted}*\n*Số liệu:* ${statsSummary}`,
+          },
+        },
+        ...(brief.aiSummary
+          ? [
+              {
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text: `*Tóm tắt Điều hành AI:*\n>${clip(brief.aiSummary, 1500).replaceAll("\n", "\n>")}`,
+                },
+              },
+            ]
+          : []),
+      ],
+    };
+  } else {
+    payload = {
+      report: `Báo cáo Dư luận Điều hành ${dayFormatted}`,
+      day: brief.day,
+      posts: brief.posts,
+      negative: negCount,
+      newAuthors: newAuthCount,
+      starred: starCount,
+      aiSummary: brief.aiSummary ?? "",
+    };
+  }
+
+  const response = await (opts.fetchImpl ?? fetch)(target, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(6000),
+  });
+
+  if (!response.ok) return `Gửi báo cáo thất bại, webhook trả về mã ${response.status}`;
+  return null;
 }

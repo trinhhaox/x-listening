@@ -7,10 +7,15 @@ const schema = z.object({
   ADMIN_PASSWORD: z.string().min(8, "ADMIN_PASSWORD cần ít nhất 8 ký tự"),
   X_BEARER_TOKEN: z.string().optional().default(""),
   FACEBOOK_ACCESS_TOKEN: z.string().optional().default(""),
+  THREADS_ACCESS_TOKEN: z.string().optional().default(""),
+  YOUTUBE_API_KEY: z.string().optional().default(""),
   LISTEN_INTERVAL_MINUTES: z.coerce.number().int().min(5).max(24 * 60).default(15),
   SEARCH_MAX_RESULTS: z.coerce.number().int().min(10).max(100).default(20),
   ALERT_WEBHOOK_URL: z.string().optional().default(""),
   DESKTOP_NOTIFY: z.enum(["0", "1"]).optional().default("1"),
+  LLM_API_KEY: z.string().optional().default(""),
+  LLM_BASE_URL: z.string().optional().default("https://api.openai.com/v1"),
+  LLM_MODEL: z.string().optional().default("gpt-4o-mini"),
 });
 
 export type AppConfig = z.infer<typeof schema>;
