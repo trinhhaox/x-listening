@@ -1,3 +1,8 @@
+import type { AppConfig } from "./config.js";
+import { searchXWithCookie } from "./xcookie.js";
+import { searchYoutubeVideos } from "./youtube.js";
+import { classifySentiment, type Sentiment } from "./sentiment.js";
+
 export type SocialSearchResult = {
   id: string;
   text: string;
@@ -235,5 +240,215 @@ export async function searchThreadsPublic(
   }
 
   return results;
+}
+
+export type LiveSearchItem = {
+  id: string;
+  source: "x" | "facebook" | "threads" | "youtube" | "web";
+  author_name: string;
+  author_username: string;
+  text: string;
+  url: string;
+  created_at: string;
+  like_count: number;
+  reply_count: number;
+  repost_count: number;
+  sentiment: Sentiment;
+};
+
+export type LiveSearchResult = {
+  query: string;
+  channels: string[];
+  items: LiveSearchItem[];
+  counts: { total: number; positive: number; negative: number; neutral: number };
+  errors: { channel: string; error: string }[];
+};
+
+export async function searchLiveMentions(
+  query: string,
+  channels: string[],
+  config: AppConfig,
+  fetchImpl: typeof fetch = fetch,
+): Promise<LiveSearchResult> {
+  const cleanQ = query.trim();
+  const activeChannels = channels.length > 0 ? channels : ["web", "x", "facebook", "threads", "youtube"];
+
+  if (!cleanQ) {
+    return {
+      query: cleanQ,
+      channels: activeChannels,
+      items: [],
+      counts: { total: 0, positive: 0, negative: 0, neutral: 0 },
+      errors: [],
+    };
+  }
+
+  const items: LiveSearchItem[] = [];
+  const errors: { channel: string; error: string }[] = [];
+
+  const tasks: Promise<void>[] = [];
+
+  if (activeChannels.includes("web")) {
+    tasks.push(
+      (async () => {
+        try {
+          const webPosts = await searchWebNews(cleanQ, 20, fetchImpl);
+          for (const post of webPosts) {
+            items.push({
+              id: post.id,
+              source: "web",
+              author_name: post.authorName,
+              author_username: post.authorUsername,
+              text: post.text,
+              url: post.url,
+              created_at: post.createdAt,
+              like_count: post.likeCount,
+              reply_count: post.replyCount,
+              repost_count: post.repostCount,
+              sentiment: classifySentiment(post.text).sentiment,
+            });
+          }
+        } catch (err: unknown) {
+          errors.push({ channel: "web", error: err instanceof Error ? err.message : String(err) });
+        }
+      })(),
+    );
+  }
+
+  if (activeChannels.includes("x")) {
+    tasks.push(
+      (async () => {
+        try {
+          const xPosts = await searchXWithCookie({
+            query: cleanQ,
+            authToken: config.TWITTER_AUTH_TOKEN,
+            ct0: config.TWITTER_CT0,
+            count: 20,
+            fetchImpl,
+          });
+          for (const post of xPosts) {
+            items.push({
+              id: post.id,
+              source: "x",
+              author_name: post.authorName,
+              author_username: post.authorUsername,
+              text: post.text,
+              url: post.url,
+              created_at: post.createdAt,
+              like_count: post.likeCount,
+              reply_count: post.replyCount,
+              repost_count: post.repostCount,
+              sentiment: classifySentiment(post.text).sentiment,
+            });
+          }
+        } catch (err: unknown) {
+          errors.push({ channel: "x", error: err instanceof Error ? err.message : String(err) });
+        }
+      })(),
+    );
+  }
+
+  if (activeChannels.includes("facebook")) {
+    tasks.push(
+      (async () => {
+        try {
+          const fbPosts = await searchFacebookPublic(cleanQ, 20, fetchImpl);
+          for (const post of fbPosts) {
+            items.push({
+              id: post.id,
+              source: "facebook",
+              author_name: post.authorName,
+              author_username: post.authorUsername,
+              text: post.text,
+              url: post.url,
+              created_at: post.createdAt,
+              like_count: post.likeCount,
+              reply_count: post.replyCount,
+              repost_count: post.repostCount,
+              sentiment: classifySentiment(post.text).sentiment,
+            });
+          }
+        } catch (err: unknown) {
+          errors.push({ channel: "facebook", error: err instanceof Error ? err.message : String(err) });
+        }
+      })(),
+    );
+  }
+
+  if (activeChannels.includes("threads")) {
+    tasks.push(
+      (async () => {
+        try {
+          const thPosts = await searchThreadsPublic(cleanQ, 20, fetchImpl);
+          for (const post of thPosts) {
+            items.push({
+              id: post.id,
+              source: "threads",
+              author_name: post.authorName,
+              author_username: post.authorUsername,
+              text: post.text,
+              url: post.url,
+              created_at: post.createdAt,
+              like_count: post.likeCount,
+              reply_count: post.replyCount,
+              repost_count: post.repostCount,
+              sentiment: classifySentiment(post.text).sentiment,
+            });
+          }
+        } catch (err: unknown) {
+          errors.push({ channel: "threads", error: err instanceof Error ? err.message : String(err) });
+        }
+      })(),
+    );
+  }
+
+  if (activeChannels.includes("youtube")) {
+    tasks.push(
+      (async () => {
+        try {
+          if (config.YOUTUBE_API_KEY && config.YOUTUBE_API_KEY.trim()) {
+            const ytPosts = await searchYoutubeVideos(config.YOUTUBE_API_KEY, cleanQ, 20, null, fetchImpl);
+            for (const post of ytPosts.posts) {
+              items.push({
+                id: post.id,
+                source: "youtube",
+                author_name: post.authorName,
+                author_username: post.authorUsername,
+                text: post.text,
+                url: post.url,
+                created_at: post.createdAt,
+                like_count: post.likeCount,
+                reply_count: post.replyCount,
+                repost_count: post.repostCount,
+                sentiment: classifySentiment(post.text).sentiment,
+              });
+            }
+          }
+        } catch (err: unknown) {
+          errors.push({ channel: "youtube", error: err instanceof Error ? err.message : String(err) });
+        }
+      })(),
+    );
+  }
+
+  await Promise.allSettled(tasks);
+
+  // Sắp xếp bài viết mới nhất lên đầu
+  items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  const counts = {
+    total: items.length,
+    positive: items.filter((i) => i.sentiment === "positive").length,
+    negative: items.filter((i) => i.sentiment === "negative").length,
+    neutral: items.filter((i) => i.sentiment === "neutral").length,
+  };
+
+  return {
+    query: cleanQ,
+    channels: activeChannels,
+    items,
+    counts,
+    errors,
+  };
 }
 

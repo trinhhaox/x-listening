@@ -14,8 +14,9 @@ import { buildSearchQuery } from "./query.js";
 import { lexiconWord } from "./sentiment.js";
 import { extractWordCloud } from "./cloud.js";
 import { analyzeHashtags } from "./hashtags.js";
+import { searchLiveMentions } from "./social_search.js";
 import { buckets, briefMarkdown, buildBrief, dayStartIso, daysEnding, localDay, spikeReason, type Brief } from "./digest.js";
-import { briefPage, comparePage, dashboardPage, hashtagsPage, loginPage, mentionsCsv, settingsPage } from "./pages.js";
+import { briefPage, comparePage, dashboardPage, hashtagsPage, loginPage, mentionsCsv, searchPage, settingsPage } from "./pages.js";
 
 const COOKIE = "xl_session";
 const attempts = new Map<string, { count: number; resetAt: number }>();
@@ -331,6 +332,31 @@ export function createApp(config: AppConfig, store: Store) {
         days,
         activeTopic: topic,
         topics: store.listTopics(),
+        notice,
+      }),
+    );
+  });
+
+  app.get("/search", async (c) => {
+    const q = (c.req.query("q") ?? "").trim();
+    const notice = c.req.query("notice") ?? "";
+    const rawChannels = c.req.queries("channel") ?? [];
+    const validChannels = ["web", "x", "facebook", "threads", "youtube"];
+    const channels = rawChannels.filter((ch) => validChannels.includes(ch));
+    const activeChannels = channels.length > 0 ? channels : validChannels;
+
+    const runtimeCfg = getRuntimeConfig(config, store);
+
+    let result = undefined;
+    if (q) {
+      result = await searchLiveMentions(q, activeChannels, runtimeCfg);
+    }
+
+    return c.html(
+      searchPage({
+        query: q,
+        selectedChannels: activeChannels,
+        result,
         notice,
       }),
     );
