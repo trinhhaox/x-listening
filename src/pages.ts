@@ -3,6 +3,7 @@ import type { Brief, DayCount } from "./digest.js";
 import type { AppConfig } from "./config.js";
 import type { WordCloudItem, TopicCluster } from "./cloud.js";
 import type { HashtagAnalyticsResult, HashtagStat } from "./hashtags.js";
+import { uiIcon } from "./icons.js";
 
 export function escapeHtml(value: string): string {
   return value
@@ -62,7 +63,7 @@ export function loginPage(error = ""): string {
           <label class="heroui-label">Mật khẩu người vận hành
             <input class="heroui-input" type="password" name="password" autocomplete="current-password" required minlength="8" placeholder="Nhập mật khẩu truy cập hệ thống..." />
           </label>
-          ${error ? `<div class="deck-alert error">⚠️ ${escapeHtml(error)}</div>` : ""}
+          ${error ? `<div class="deck-alert error">${uiIcon("alert")} ${escapeHtml(error)}</div>` : ""}
           <button type="submit" class="btn btn-primary btn-block btn-lg">Đăng nhập vào Hệ thống</button>
         </div>
       </form>
@@ -124,7 +125,7 @@ export function dashboardPage(model: DashboardModel): string {
       <div class="alarm-item heroui-card">
         <div class="alarm-content">
           <div class="alarm-header">
-            <span class="heroui-chip heroui-chip-danger">🚨 ${escapeHtml(hit.alert_name)}</span>
+            <span class="heroui-chip heroui-chip-danger">${uiIcon("alert", 13)} ${escapeHtml(hit.alert_name)}</span>
             <span class="alarm-meta">${escapeHtml(hit.author_name)} · ${escapeHtml(hit.topic_name)}</span>
           </div>
           <p class="alarm-text">${escapeHtml(hit.text)}</p>
@@ -284,20 +285,20 @@ export function dashboardPage(model: DashboardModel): string {
     <div class="deck-page-header">
       <div class="page-header-title">
         <div class="title-with-badge">
-          <h1>📊 Tổng quan & Dây tin Dư luận</h1>
+          <h1>${uiIcon("dashboard", 22)} Tổng quan & Dây tin Dư luận</h1>
           <span class="heroui-chip heroui-chip-primary">Giám sát Đa nền tảng</span>
         </div>
         <p class="text-muted">Theo dõi và phân tích cảm xúc thời gian thực trên Facebook, X, Threads, YouTube & Báo chí</p>
       </div>
       <div class="page-header-actions">
-        <button class="btn btn-outline" type="button" onclick="const p=document.getElementById('deck-admin-panel'); if(p){ p.open=!p.open; if(p.open) p.scrollIntoView({behavior:'smooth'}); }">⚙️ Nguồn theo dõi & Cảnh báo (${model.topics.length})</button>
+        <button class="btn btn-outline" type="button" onclick="const p=document.getElementById('deck-admin-panel'); if(p){ p.open=!p.open; if(p.open) p.scrollIntoView({behavior:'smooth'}); }">${uiIcon("settings")} Nguồn theo dõi & Cảnh báo (${model.topics.length})</button>
       </div>
     </div>
 
-    ${model.notice ? `<div class="deck-alert info">ℹ️ ${escapeHtml(model.notice)}</div>` : ""}
-    ${model.spike ? `<div class="deck-alert warning">⚡ <strong>Đột biến phát hiện:</strong> ${escapeHtml(model.spike)}</div>` : ""}
-    ${model.xNotice ? `<div class="deck-alert warning">⚠️ ${model.xNotice}</div>` : ""}
-    ${model.hasFacebook ? "" : `<div class="deck-alert warning">⚠️ Chưa có cấu hình Facebook Cookie. Vào mục <a href="/settings">Cấu hình kết nối</a> để thêm.</div>`}
+    ${model.notice ? `<div class="deck-alert info">${uiIcon("info")} ${escapeHtml(model.notice)}</div>` : ""}
+    ${model.spike ? `<div class="deck-alert warning">${uiIcon("zap")} <strong>Đột biến phát hiện:</strong> ${escapeHtml(model.spike)}</div>` : ""}
+    ${model.xNotice ? `<div class="deck-alert warning">${uiIcon("alert")} ${model.xNotice}</div>` : ""}
+    ${model.hasFacebook ? "" : `<div class="deck-alert warning">${uiIcon("alert")} Chưa có cấu hình Facebook Cookie. Vào mục <a href="/settings">Cấu hình kết nối</a> để thêm.</div>`}
 
     <!-- KHU VỰC 1: RADAR TÌNH BÁO & CẢNH BÁO KHỦNG HOẢNG (NỬA TRÊN) -->
     <section class="executive-radar">
@@ -305,7 +306,7 @@ export function dashboardPage(model: DashboardModel): string {
       <div class="radar-card radar-kpi-card heroui-card">
         <div class="radar-card-head">
           <div>
-            <h3>📈 Thống kê tin tức trong 24 giờ qua</h3>
+            <h3>${uiIcon("chart", 18)} Thống kê tin tức trong 24 giờ qua</h3>
             <span class="radar-sub">Dữ liệu cập nhật thời gian thực</span>
           </div>
           <span class="heroui-chip heroui-chip-success"><i class="heroui-dot"></i> Đang hoạt động</span>
@@ -329,9 +330,9 @@ export function dashboardPage(model: DashboardModel): string {
           <div class="feel-header">
             <span class="feel-title">Tỷ lệ cảm xúc dư luận</span>
             <span class="feel-percent">
-              <span class="feel-stat-pos">🟢 ${pct(model.stats.positive)}% Tích cực</span> · 
-              <span class="feel-stat-neg">🔴 ${pct(model.stats.negative)}% Tiêu cực</span> · 
-              <span class="feel-stat-neu">⚪ ${pct(model.stats.neutral)}% Trung tính</span>
+              <span class="feel-stat-pos"><span class="stat-dot pos"></span>${pct(model.stats.positive)}% Tích cực</span> · 
+              <span class="feel-stat-neg"><span class="stat-dot neg"></span>${pct(model.stats.negative)}% Tiêu cực</span> · 
+              <span class="feel-stat-neu"><span class="stat-dot neu"></span>${pct(model.stats.neutral)}% Trung tính</span>
             </span>
           </div>
           <div class="feel-bar-track">
@@ -351,7 +352,7 @@ export function dashboardPage(model: DashboardModel): string {
       <div class="radar-card radar-trend-card heroui-card">
         <div class="radar-card-head">
           <div>
-            <h3>📊 Biểu đồ lượng bài 7 ngày qua</h3>
+            <h3>${uiIcon("activity", 18)} Biểu đồ lượng bài 7 ngày qua</h3>
             <span class="radar-sub">Xu hướng biến động theo ngày</span>
           </div>
           <span class="heroui-chip heroui-chip-primary">7 ngày</span>
@@ -373,7 +374,7 @@ export function dashboardPage(model: DashboardModel): string {
       <div class="radar-card radar-alarms-card heroui-card">
         <div class="radar-card-head">
           <div>
-            <h3>🚨 Cảnh báo khẩn & Điểm nóng</h3>
+            <h3>${uiIcon("alert", 18)} Cảnh báo khẩn & Điểm nóng</h3>
             <span class="radar-sub">Các bài viết vi phạm điều kiện an toàn</span>
           </div>
           <span class="heroui-chip ${model.hits.length > 0 ? "heroui-chip-danger" : "heroui-chip-success"}">
@@ -384,7 +385,7 @@ export function dashboardPage(model: DashboardModel): string {
           ${
             hits ||
             `<div class="empty-alarms">
-              <span class="shield-icon">🛡️</span>
+              <span class="shield-icon">${uiIcon("shieldCheck", 36)}</span>
               <p><strong>Tình hình bình ổn</strong></p>
               <small>Không có bài viết tiêu cực bùng nổ hay kích hoạt cảnh báo rủi ro nào.</small>
             </div>`
@@ -404,7 +405,7 @@ export function dashboardPage(model: DashboardModel): string {
         ${viewLink("new", `Chưa đọc ${model.queueNew ? `(${model.queueNew})` : ""}`)}
         ${viewLink("reading", "Đang theo dõi")}
         ${viewLink("done", "Đã giải quyết")}
-        ${viewLink("starred", "Đã lưu ý ⭐")}
+        ${viewLink("starred", `Đã lưu ý ${uiIcon("starFilled", 13)}`)}
         ${viewLink("hidden", "Đã ẩn")}
       </div>
 
@@ -417,15 +418,15 @@ export function dashboardPage(model: DashboardModel): string {
           </select>
           <select class="heroui-select" name="sentiment" title="Cảm xúc">
             <option value="">Tất cả cảm xúc</option>
-            <option value="positive"${model.sentimentFilter === "positive" ? " selected" : ""}>🟢 Tích cực</option>
-            <option value="negative"${model.sentimentFilter === "negative" ? " selected" : ""}>🔴 Tiêu cực</option>
-            <option value="neutral"${model.sentimentFilter === "neutral" ? " selected" : ""}>⚪ Trung tính</option>
+            <option value="positive"${model.sentimentFilter === "positive" ? " selected" : ""}>Tích cực</option>
+            <option value="negative"${model.sentimentFilter === "negative" ? " selected" : ""}>Tiêu cực</option>
+            <option value="neutral"${model.sentimentFilter === "neutral" ? " selected" : ""}>Trung tính</option>
           </select>
-          <input class="heroui-input search-input" type="search" name="search" value="${escapeHtml(model.search ?? "")}" placeholder="🔍 Tìm nội dung, tác giả..." />
-          <input class="heroui-input tag-input" type="text" name="tag" value="${escapeHtml(model.tagFilter ?? "")}" placeholder="🏷️ Nhãn phân loại" />
-          <input class="heroui-input assignee-input" type="text" name="assigned_to" value="${escapeHtml(model.assignedToFilter ?? "")}" placeholder="👤 Người phụ trách" />
-          <input class="heroui-input likes-input" type="number" name="min_likes" value="${model.minLikesFilter ?? ""}" min="0" placeholder="👍 Lượt thích ≥" />
-          <button class="btn btn-sm btn-primary" type="submit">Lọc tin</button>
+          <input class="heroui-input search-input" type="search" name="search" value="${escapeHtml(model.search ?? "")}" placeholder="Tìm nội dung, tác giả..." />
+          <input class="heroui-input tag-input" type="text" name="tag" value="${escapeHtml(model.tagFilter ?? "")}" placeholder="Nhãn phân loại..." />
+          <input class="heroui-input assignee-input" type="text" name="assigned_to" value="${escapeHtml(model.assignedToFilter ?? "")}" placeholder="Người phụ trách..." />
+          <input class="heroui-input likes-input" type="number" name="min_likes" value="${model.minLikesFilter ?? ""}" min="0" placeholder="Lượt thích ≥" />
+          <button class="btn btn-sm btn-primary" type="submit">${uiIcon("filter")} Lọc tin</button>
           ${
             model.search || model.sentimentFilter || model.minLikesFilter || model.tagFilter || model.assignedToFilter || model.activeTopic
               ? `<a class="btn-clear" href="/${model.view !== "wire" ? `?view=${encodeURIComponent(model.view)}` : ""}">Xóa bộ lọc</a>`
@@ -433,8 +434,8 @@ export function dashboardPage(model: DashboardModel): string {
           }
         </div>
         <div class="ribbon-export">
-          <button class="btn btn-sm btn-outline" type="button" onclick="const p=document.getElementById('deck-admin-panel'); if(p){ p.open=!p.open; if(p.open) p.scrollIntoView({behavior:'smooth'}); }" title="Mở bảng cấu hình Nguồn theo dõi, Cảnh báo, Từ điển">⚙️ Nguồn theo dõi (${model.topics.length})</button>
-          <button class="btn btn-sm btn-primary" type="submit" form="auto-classify-form" title="Tự động phân loại nhãn và gán người xử lý cho các bài viết chưa gán">⚡ Tự động phân loại bằng AI</button>
+          <button class="btn btn-sm btn-outline" type="button" onclick="const p=document.getElementById('deck-admin-panel'); if(p){ p.open=!p.open; if(p.open) p.scrollIntoView({behavior:'smooth'}); }" title="Mở bảng cấu hình Nguồn theo dõi, Cảnh báo, Từ điển">${uiIcon("settings")} Nguồn theo dõi (${model.topics.length})</button>
+          <button class="btn btn-sm btn-primary" type="submit" form="auto-classify-form" title="Tự động phân loại nhãn và gán người xử lý cho các bài viết chưa gán">${uiIcon("zap")} Tự động phân loại bằng AI</button>
           <a class="btn btn-sm btn-outline" href="/export.csv?${(() => {
             const p = new URLSearchParams();
             if (model.activeTopic) p.set("topic", model.activeTopic);
@@ -444,7 +445,7 @@ export function dashboardPage(model: DashboardModel): string {
             if (model.tagFilter) p.set("tag", model.tagFilter);
             if (model.assignedToFilter) p.set("assigned_to", model.assignedToFilter);
             return p.toString();
-          })()}">📥 Xuất file Excel / CSV</a>
+          })()}">${uiIcon("download")} Xuất file Excel / CSV</a>
         </div>
       </form>
       <form id="auto-classify-form" method="post" action="/mentions/auto-classify" style="display:none;">
@@ -459,7 +460,7 @@ export function dashboardPage(model: DashboardModel): string {
       <div class="stream-column stream-critical heroui-card">
         <div class="stream-header critical-head">
           <div class="stream-title-wrap">
-            <span class="stream-badge-icon">🔥</span>
+            <span class="stream-badge-icon">${uiIcon("flame", 18)}</span>
             <h2>BÀI VIẾT TIÊU CỰC CẦN XỬ LÝ GẤP</h2>
           </div>
           <span class="heroui-chip heroui-chip-danger">${criticalMentions.length} bài</span>
@@ -470,7 +471,7 @@ export function dashboardPage(model: DashboardModel): string {
           ${
             criticalCards ||
             `<div class="stream-empty safe">
-              <span class="empty-icon">🛡️</span>
+              <span class="empty-icon">${uiIcon("shieldCheck", 36)}</span>
               <p><strong>Không có bài viết nguy cơ cao</strong></p>
               <small>Thương hiệu đang an toàn trong phạm vi theo dõi hiện tại.</small>
             </div>`
@@ -482,7 +483,7 @@ export function dashboardPage(model: DashboardModel): string {
       <div class="stream-column stream-natural heroui-card">
         <div class="stream-header natural-head">
           <div class="stream-title-wrap">
-            <span class="stream-badge-icon">💬</span>
+            <span class="stream-badge-icon">${uiIcon("message", 18)}</span>
             <h2>THẢO LUẬN TỰ NHIÊN & KHEN NGỢI</h2>
           </div>
           <span class="heroui-chip heroui-chip-success">${naturalMentions.length} bài</span>
@@ -493,7 +494,7 @@ export function dashboardPage(model: DashboardModel): string {
           ${
             naturalCards ||
             `<div class="stream-empty">
-              <span class="empty-icon">📭</span>
+              <span class="empty-icon">${uiIcon("inbox", 36)}</span>
               <p><strong>Chưa có bài viết phù hợp</strong></p>
               <small>Thử mở rộng bộ lọc hoặc chọn tất cả nguồn tin để xem thêm bài viết.</small>
             </div>`
@@ -521,14 +522,14 @@ function renderAdminPanel(
       <summary class="deck-admin-summary">
         <div class="admin-summary-content">
           <div class="admin-summary-title">
-            <span class="admin-gear-icon">⚙️</span>
+            <span class="admin-gear-icon">${uiIcon("settings", 20)}</span>
             <strong>Quản lý Nguồn theo dõi, Thông báo cảnh báo & Mẫu câu phản hồi</strong>
           </div>
           <div class="admin-summary-badges">
-            <span class="heroui-chip heroui-chip-primary">📡 ${model.topics.length} nguồn tin</span>
-            <span class="heroui-chip heroui-chip-warning">🔔 ${model.alerts.length} cảnh báo</span>
-            <span class="heroui-chip heroui-chip-default">📚 ${model.lexicon.length} từ điển</span>
-            <span class="heroui-chip heroui-chip-default">💬 ${model.templates.length} mẫu câu</span>
+            <span class="heroui-chip heroui-chip-primary">${uiIcon("radio", 13)} ${model.topics.length} nguồn tin</span>
+            <span class="heroui-chip heroui-chip-warning">${uiIcon("bell", 13)} ${model.alerts.length} cảnh báo</span>
+            <span class="heroui-chip heroui-chip-default">${uiIcon("book", 13)} ${model.lexicon.length} từ điển</span>
+            <span class="heroui-chip heroui-chip-default">${uiIcon("message", 13)} ${model.templates.length} mẫu câu</span>
             <span class="admin-pill-action">Bấm để mở cấu hình ▾</span>
           </div>
         </div>
@@ -539,7 +540,7 @@ function renderAdminPanel(
         <!-- Card 1: Quản lý Nguồn theo dõi -->
         <div class="admin-card heroui-card-sub">
           <div class="admin-card-head">
-            <h3>📡 Kênh & Nguồn đang theo dõi</h3>
+            <h3>${uiIcon("radio", 18)} Kênh & Nguồn đang theo dõi</h3>
           </div>
           <form class="admin-form" method="post" action="/topics">
             <div class="form-row">
@@ -571,7 +572,7 @@ function renderAdminPanel(
         <!-- Card 2: Chuông cảnh báo & Bùng nổ gia tốc -->
         <div class="admin-card heroui-card-sub">
           <div class="admin-card-head">
-            <h3>🔔 Thiết lập Điều kiện cảnh báo tự động</h3>
+            <h3>${uiIcon("bell", 18)} Thiết lập Điều kiện cảnh báo tự động</h3>
           </div>
           <form class="admin-form" method="post" action="/alerts">
             <div class="form-row">
@@ -606,15 +607,15 @@ function renderAdminPanel(
         <!-- Card 3: Từ điển sắc thái riêng & Mẫu CSKH -->
         <div class="admin-card heroui-card-sub">
           <div class="admin-card-head">
-            <h3>📚 Từ điển Cảm xúc & Mẫu phản hồi nhanh</h3>
+            <h3>${uiIcon("book", 18)} Từ điển Cảm xúc & Mẫu phản hồi nhanh</h3>
           </div>
           <form class="admin-form" method="post" action="/lexicon">
             <div class="form-row">
               <label class="heroui-label">Từ ngữ đặc thù ngành<input class="heroui-input" name="word" required maxlength="40" placeholder="ngon, xịn, mượt, lag, ẩu..." /></label>
               <label class="heroui-label">Đánh giá cảm xúc
                 <select class="heroui-select" name="polarity">
-                  <option value="positive">🟢 Tích cực (Tốt)</option>
-                  <option value="negative">🔴 Tiêu cực (Xấu)</option>
+                  <option value="positive">Tích cực (Tốt)</option>
+                  <option value="negative">Tiêu cực (Xấu)</option>
                 </select>
               </label>
             </div>
@@ -637,7 +638,7 @@ function renderAdminPanel(
         <!-- Card 4: Tắt tiếng & Dữ liệu mẫu -->
         <div class="admin-card heroui-card-sub">
           <div class="admin-card-head">
-            <h3>🔇 Tài khoản bỏ qua & Dữ liệu mẫu</h3>
+            <h3>${uiIcon("mute", 18)} Tài khoản bỏ qua & Dữ liệu mẫu</h3>
           </div>
           <div class="admin-tool-list">
             ${mutedItems || `<p class="empty-small text-muted">Chưa có tài khoản nào trong danh sách bỏ qua.</p>`}
@@ -650,6 +651,25 @@ function renderAdminPanel(
       </div>
     </details>
   `;
+}
+
+function getClusterIcon(id: string): string {
+  switch (id) {
+    case "shipping":
+      return uiIcon("package", 13);
+    case "service":
+      return uiIcon("headphones", 13);
+    case "product":
+      return uiIcon("gem", 13);
+    case "pricing":
+      return uiIcon("tag", 13);
+    case "praise":
+      return uiIcon("starFilled", 13);
+    case "pr":
+      return uiIcon("megaphone", 13);
+    default:
+      return uiIcon("hash", 13);
+  }
 }
 
 function renderWordCloudSection(
@@ -669,7 +689,7 @@ function renderWordCloudSection(
     .map((c) => {
       const topicParam = activeTopic ? `&topic=${encodeURIComponent(activeTopic)}` : "";
       return `<a href="/?search=${encodeURIComponent(c.keywords[0] ?? c.name)}${topicParam}" class="cloud-cluster-badge heroui-chip ${c.sentiment === "positive" ? "heroui-chip-success" : c.sentiment === "negative" ? "heroui-chip-danger" : "heroui-chip-default"}" title="Nhóm ${escapeHtml(c.name)}: ${c.keywords.join(", ")}">
-        <span class="cluster-icon">${c.icon}</span>
+        <span class="cluster-icon">${getClusterIcon(c.id)}</span>
         <span class="cluster-title">${escapeHtml(c.name)}</span>
         <span class="cluster-num">${c.count} bài</span>
       </a>`;
@@ -696,7 +716,7 @@ function renderWordCloudSection(
   <section class="radar-cloud-card heroui-card">
     <div class="cloud-card-header">
       <div class="cloud-card-title">
-        <span class="cloud-icon">☁️</span>
+        <span class="cloud-icon">${uiIcon("cloud", 20)}</span>
         <div>
           <h3>Từ khóa & Chủ đề thảo luận sôi nổi nhất</h3>
           <span class="cloud-sub">Dữ liệu 7 ngày qua · Bấm vào từ khóa hoặc chủ đề để lọc bài viết nhanh chóng</span>
@@ -737,9 +757,9 @@ function renderMentionCard(
   const action = `/mentions/${encodeURIComponent(mention.topic_id)}/${encodeURIComponent(mention.id)}`;
   const sample = mention.sample ? `<span class="heroui-chip heroui-chip-default">MẪU DỮ LIỆU</span>` : "";
   const note = mention.note ? `<div class="card-note-box"><strong>Ghi chú nội bộ:</strong> ${escapeHtml(mention.note)}</div>` : "";
-  const tagBadge = mention.tag ? `<span class="heroui-chip heroui-chip-primary">🏷️ ${escapeHtml(mention.tag)}</span>` : "";
+  const tagBadge = mention.tag ? `<span class="heroui-chip heroui-chip-primary">${uiIcon("tag", 12)} ${escapeHtml(mention.tag)}</span>` : "";
   const assigneeBadge = mention.assigned_to
-    ? `<span class="heroui-chip heroui-chip-bordered">👤 ${escapeHtml(mention.assigned_to)}</span>`
+    ? `<span class="heroui-chip heroui-chip-bordered">${uiIcon("user", 12)} ${escapeHtml(mention.assigned_to)}</span>`
     : "";
 
   const sentimentChip =
@@ -773,10 +793,10 @@ function renderMentionCard(
     ${note}
 
     <div class="card-meta-row">
-      <span class="source-topic-tag heroui-chip heroui-chip-bordered">📡 ${escapeHtml(mention.topic_name)}</span>
+      <span class="source-topic-tag heroui-chip heroui-chip-bordered">${uiIcon("radio", 12)} ${escapeHtml(mention.topic_name)}</span>
       ${sample}
-      <span class="stats-counter text-muted">❤️ ${mention.like_count} · 💬 ${mention.reply_count} · 🔁 ${mention.repost_count}</span>
-      ${mention.sample || !href ? "" : `<a class="out-link heroui-link" href="${escapeHtml(href)}" target="_blank" rel="noreferrer">Xem trên ${openLabel} ↗</a>`}
+      <span class="stats-counter text-muted"><span class="stats-item">${uiIcon("heart", 13)} ${mention.like_count}</span> · <span class="stats-item">${uiIcon("message", 13)} ${mention.reply_count}</span> · <span class="stats-item">${uiIcon("share", 13)} ${mention.repost_count}</span></span>
+      ${mention.sample || !href ? "" : `<a class="out-link heroui-link" href="${escapeHtml(href)}" target="_blank" rel="noreferrer">Xem trên ${openLabel} ${uiIcon("external", 11)}</a>`}
     </div>
 
     <!-- Tác vụ xử lý điều hành & CSKH -->
@@ -788,32 +808,32 @@ function renderMentionCard(
       </div>
 
       <div class="util-btns">
-        <form method="post" action="${action}/star">${backFields}<button class="btn-icon" title="${mention.starred ? "Bỏ lưu ý" : "Lưu ý quan trọng"}" type="submit">${mention.starred ? "⭐" : "☆"}</button></form>
-        <form method="post" action="${action}/hide">${backFields}<button class="btn-icon" title="${mention.hidden ? "Hiện lại" : "Ẩn bài này"}" type="submit">${mention.hidden ? "👁️" : "🚫"}</button></form>
-        <form method="post" action="/mutes">${backFields}<input type="hidden" name="username" value="${escapeHtml(username)}" /><button class="btn-icon" title="Bỏ qua tài khoản này" type="submit">🔇</button></form>
+        <form method="post" action="${action}/star">${backFields}<button class="btn-icon" title="${mention.starred ? "Bỏ lưu ý" : "Lưu ý quan trọng"}" type="submit">${mention.starred ? uiIcon("starFilled", 14) : uiIcon("star", 14)}</button></form>
+        <form method="post" action="${action}/hide">${backFields}<button class="btn-icon" title="${mention.hidden ? "Hiện lại" : "Ẩn bài này"}" type="submit">${mention.hidden ? uiIcon("eye", 14) : uiIcon("eyeOff", 14)}</button></form>
+        <form method="post" action="/mutes">${backFields}<input type="hidden" name="username" value="${escapeHtml(username)}" /><button class="btn-icon" title="Bỏ qua tài khoản này" type="submit">${uiIcon("mute", 14)}</button></form>
       </div>
 
       <div class="inline-forms">
         <form class="inline-form" method="post" action="${action}/auto-classify">${backFields}
-          <button class="btn btn-xs btn-outline btn-ai-tag" type="submit" title="AI tự động phân loại nhãn và gán người xử lý cho riêng bài này">⚡ AI Gán</button>
+          <button class="btn btn-xs btn-outline btn-ai-tag" type="submit" title="AI tự động phân loại nhãn và gán người xử lý cho riêng bài này">${uiIcon("zap", 12)} AI Gán</button>
         </form>
 
         <form class="inline-form" method="post" action="${action}/tag">${backFields}
           <select class="heroui-select heroui-select-sm" name="tag" onchange="this.form.submit()" title="Gắn nhãn phân loại nhanh">
-            <option value="">🏷️ Nhãn</option>
-            <option value="Giao hàng"${mention.tag === "Giao hàng" ? " selected" : ""}>📦 Giao hàng</option>
-            <option value="Dịch vụ"${mention.tag === "Dịch vụ" ? " selected" : ""}>🎧 Dịch vụ</option>
-            <option value="Sản phẩm"${mention.tag === "Sản phẩm" ? " selected" : ""}>💎 Sản phẩm</option>
-            <option value="Giá cả"${mention.tag === "Giá cả" ? " selected" : ""}>🏷️ Giá cả</option>
-            <option value="Khen ngợi"${mention.tag === "Khen ngợi" ? " selected" : ""}>🌟 Khen ngợi</option>
-            <option value="Truyền thông"${mention.tag === "Truyền thông" ? " selected" : ""}>📢 Truyền thông</option>
-            <option value="Chung"${mention.tag === "Chung" ? " selected" : ""}>💬 Chung</option>
+            <option value="">Nhãn</option>
+            <option value="Giao hàng"${mention.tag === "Giao hàng" ? " selected" : ""}>Vận chuyển</option>
+            <option value="Dịch vụ"${mention.tag === "Dịch vụ" ? " selected" : ""}>Dịch vụ & CSKH</option>
+            <option value="Sản phẩm"${mention.tag === "Sản phẩm" ? " selected" : ""}>Chất lượng sản phẩm</option>
+            <option value="Giá cả"${mention.tag === "Giá cả" ? " selected" : ""}>Giá & Ưu đãi</option>
+            <option value="Khen ngợi"${mention.tag === "Khen ngợi" ? " selected" : ""}>Khen ngợi</option>
+            <option value="Truyền thông"${mention.tag === "Truyền thông" ? " selected" : ""}>Truyền thông</option>
+            <option value="Chung"${mention.tag === "Chung" ? " selected" : ""}>Thảo luận chung</option>
             <option value="Khác"${mention.tag === "Khác" ? " selected" : ""}>Khác</option>
           </select>
         </form>
 
         <form class="inline-form" method="post" action="${action}/assign">${backFields}
-          <input class="heroui-input heroui-input-sm" name="assigned_to" maxlength="40" value="${escapeHtml(mention.assigned_to)}" placeholder="👤 Gán người..." />
+          <input class="heroui-input heroui-input-sm" name="assigned_to" maxlength="40" value="${escapeHtml(mention.assigned_to)}" placeholder="Gán người..." />
           <button class="btn btn-xs btn-outline" type="submit">Gán</button>
         </form>
       </div>
@@ -875,7 +895,7 @@ export function briefPage(brief: Brief, notice?: string): string {
       <li class="brief-item starred heroui-card-sub">
         <div class="brief-item-head">
           <strong>@${escapeHtml(post.authorUsername)}</strong>
-          <span class="heroui-chip heroui-chip-warning">⭐ Đã lưu ý</span>
+          <span class="heroui-chip heroui-chip-warning">${uiIcon("starFilled", 13)} Đã lưu ý</span>
         </div>
         <p>${escapeHtml(post.text)}</p>
       </li>`,
@@ -888,18 +908,18 @@ export function briefPage(brief: Brief, notice?: string): string {
     <div class="deck-page-header">
       <div class="page-header-title">
         <div class="title-with-badge">
-          <h1>📑 Báo cáo Tổng hợp Truyền thông Ngày ${escapeHtml(brief.day.split("-").reverse().join("/"))}</h1>
+          <h1>${uiIcon("report", 22)} Báo cáo Tổng hợp Truyền thông Ngày ${escapeHtml(brief.day.split("-").reverse().join("/"))}</h1>
           <span class="heroui-chip heroui-chip-primary">Báo cáo Tổng hợp AI</span>
         </div>
         <p class="text-muted">Đánh giá rủi ro, phân loại ý kiến tiêu cực và đề xuất hành động từ trợ lý AI</p>
       </div>
       <div class="page-header-actions">
-        <a class="btn btn-outline" href="/brief.md">📥 Tải file Markdown (.md)</a>
-        <form method="post" action="/brief/send-webhook" style="display:inline-block;"><button class="btn btn-primary" type="submit">🚀 Gửi qua Webhook</button></form>
+        <a class="btn btn-outline" href="/brief.md">${uiIcon("download")} Tải file Markdown (.md)</a>
+        <form method="post" action="/brief/send-webhook" style="display:inline-block;"><button class="btn btn-primary" type="submit">${uiIcon("send")} Gửi qua Webhook</button></form>
       </div>
     </div>
 
-    ${notice ? `<div class="deck-alert info">${escapeHtml(notice)}</div>` : ""}
+    ${notice ? `<div class="deck-alert info">${uiIcon("info")} ${escapeHtml(notice)}</div>` : ""}
 
     <!-- Chỉ số tóm tắt -->
     <section class="executive-radar" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 24px;">
@@ -924,7 +944,7 @@ export function briefPage(brief: Brief, notice?: string): string {
     <!-- Khối Executive AI Summary -->
     <section class="ai-brief-card heroui-card" style="margin-bottom: 24px;">
       <div class="ai-brief-head">
-        <span class="ai-badge heroui-chip heroui-chip-primary">🤖 Trợ lý AI Phân tích</span>
+        <span class="ai-badge heroui-chip heroui-chip-primary">${uiIcon("bot", 14)} Trợ lý AI Phân tích</span>
         <h2>Tóm tắt Tình hình & Đánh giá Rủi ro Truyền thông</h2>
       </div>
       <div class="ai-brief-content">
@@ -935,21 +955,21 @@ export function briefPage(brief: Brief, notice?: string): string {
     <!-- 3 Cột chi tiết -->
     <section class="brief-columns-grid">
       <div class="brief-col heroui-card">
-        <h3>🔴 Ý kiến tiêu cực (${brief.negative.length})</h3>
+        <h3><span class="stat-dot neg"></span> Ý kiến tiêu cực (${brief.negative.length})</h3>
         <ul class="brief-list">
           ${negative || `<li class="empty-brief text-muted">Không có bài viết tiêu cực nào trong ngày hôm nay.</li>`}
         </ul>
       </div>
 
       <div class="brief-col heroui-card">
-        <h3>👤 Tác giả mới thảo luận (${brief.newAuthors.length})</h3>
+        <h3>${uiIcon("user", 16)} Tác giả mới thảo luận (${brief.newAuthors.length})</h3>
         <ul class="brief-list">
           ${authors || `<li class="empty-brief text-muted">Không có người viết mới phát sinh trong ngày.</li>`}
         </ul>
       </div>
 
       <div class="brief-col heroui-card">
-        <h3>⭐ Đang lưu ý theo dõi (${brief.starred.length})</h3>
+        <h3>${uiIcon("starFilled", 16)} Đang lưu ý theo dõi (${brief.starred.length})</h3>
         <ul class="brief-list">
           ${starred || `<li class="empty-brief text-muted">Không có bài viết nào được đánh dấu sao.</li>`}
         </ul>
@@ -991,7 +1011,7 @@ export function comparePage(model: { topics: Topic[]; left: string; right: strin
     <div class="deck-page-header">
       <div class="page-header-title">
         <div class="title-with-badge">
-          <h1>⚖️ So sánh Đối chuẩn giữa 2 Nguồn theo dõi</h1>
+          <h1>${uiIcon("compare", 22)} So sánh Đối chuẩn giữa 2 Nguồn theo dõi</h1>
           <span class="heroui-chip heroui-chip-primary">So sánh Đối chuẩn</span>
         </div>
         <p class="text-muted">So sánh khối lượng và xu hướng thảo luận trong 7 ngày qua</p>
@@ -1046,10 +1066,10 @@ export function hashtagsPage(model: HashtagsPageModel): string {
     .map((h, i) => {
       const statusBadge =
         h.sentimentStatus === "warning"
-          ? `<span class="heroui-chip heroui-chip-danger" title="Tỷ lệ tiêu cực ≥ 30%">🚨 Rủi ro (${h.negPct}% tiêu cực)</span>`
+          ? `<span class="heroui-chip heroui-chip-danger" title="Tỷ lệ tiêu cực ≥ 30%">${uiIcon("alert", 12)} Rủi ro (${h.negPct}% tiêu cực)</span>`
           : h.sentimentStatus === "positive"
-            ? `<span class="heroui-chip heroui-chip-success">🟢 Tích cực (${h.posPct}%)</span>`
-            : `<span class="heroui-chip heroui-chip-default">⚪ Trung tính</span>`;
+            ? `<span class="heroui-chip heroui-chip-success"><span class="stat-dot pos"></span>Tích cực (${h.posPct}%)</span>`
+            : `<span class="heroui-chip heroui-chip-default"><span class="stat-dot neu"></span>Trung tính</span>`;
 
       const authors = h.topAuthors.length > 0 ? h.topAuthors.map((a) => `@${escapeHtml(a)}`).join(", ") : "—";
 
@@ -1078,16 +1098,16 @@ export function hashtagsPage(model: HashtagsPageModel): string {
             </div>
           </div>
         </td>
-        <td class="col-engagement">❤️ ${h.engagement.toLocaleString("vi-VN")}</td>
+        <td class="col-engagement"><span class="stats-item">${uiIcon("heart", 13)} ${h.engagement.toLocaleString("vi-VN")}</span></td>
         <td class="col-authors text-muted">${authors}</td>
         <td class="col-actions">
           <div class="hashtag-action-btns">
-            <a class="btn btn-xs btn-outline" href="/?search=${encodeURIComponent(h.tag)}${activeTopic ? `&topic=${encodeURIComponent(activeTopic)}` : ""}">🔍 Xem tin tức</a>
+            <a class="btn btn-xs btn-outline" href="/?search=${encodeURIComponent(h.tag)}${activeTopic ? `&topic=${encodeURIComponent(activeTopic)}` : ""}">${uiIcon("search", 12)} Xem bài viết</a>
             <form method="post" action="/topics" style="display:inline-block;">
               <input type="hidden" name="name" value="Theo dõi ${escapeHtml(h.tag)}" />
               <input type="hidden" name="source" value="x" />
               <input type="hidden" name="query" value="${escapeHtml(h.tag)}" />
-              <button class="btn btn-xs btn-primary" type="submit" title="Tạo nguồn theo dõi tự động cho từ khóa/hashtag này">+ Đưa vào giám sát</button>
+              <button class="btn btn-xs btn-primary" type="submit" title="Tạo nguồn theo dõi tự động cho từ khóa/hashtag này">${uiIcon("plus", 12)} Đưa vào giám sát</button>
             </form>
           </div>
         </td>
@@ -1102,7 +1122,7 @@ export function hashtagsPage(model: HashtagsPageModel): string {
     <div class="deck-page-header">
       <div class="page-header-title">
         <div class="title-with-badge">
-          <h1>🔥 Phân tích Xu hướng, Từ khóa & Hashtags</h1>
+          <h1>${uiIcon("flame", 22)} Phân tích Xu hướng, Từ khóa & Hashtags</h1>
           <span class="heroui-chip heroui-chip-primary">Xu hướng & Từ khóa Dư luận</span>
         </div>
         <p class="text-muted">Đo lường, phát hiện sớm rủi ro và xu hướng theo Từ khóa & Hashtags đa nền tảng</p>
@@ -1112,7 +1132,7 @@ export function hashtagsPage(model: HashtagsPageModel): string {
       </div>
     </div>
 
-    ${notice ? `<div class="deck-alert info">ℹ️ ${escapeHtml(notice)}</div>` : ""}
+    ${notice ? `<div class="deck-alert info">${uiIcon("info")} ${escapeHtml(notice)}</div>` : ""}
 
     <!-- KHU VỰC BỘ LỌC THỜI GIAN VÀ NGUỒN TIN -->
     <section class="deck-ribbon heroui-card" style="margin-bottom: 20px;">
@@ -1194,7 +1214,7 @@ export function settingsPage(config: AppConfig, notice?: string): string {
     <div class="deck-page-header">
       <div class="page-header-title">
         <div class="title-with-badge">
-          <h1>🔌 Cài đặt Bàn nghe & Cấu hình Hệ thống</h1>
+          <h1>${uiIcon("settings", 22)} Cài đặt Bàn nghe & Cấu hình Hệ thống</h1>
           <span class="heroui-chip heroui-chip-primary">Cấu hình Hệ thống</span>
         </div>
         <p class="text-muted">Cấu hình kết nối Mạng xã hội, Cookie phiên, Trí tuệ Nhân tạo AI và Nhận thông báo tự động</p>
@@ -1204,13 +1224,13 @@ export function settingsPage(config: AppConfig, notice?: string): string {
       </div>
     </div>
 
-    ${notice ? `<div class="deck-alert info">${escapeHtml(notice)}</div>` : ""}
+    ${notice ? `<div class="deck-alert info">${uiIcon("info")} ${escapeHtml(notice)}</div>` : ""}
 
     <form class="settings-form" method="post" action="/settings">
       <div class="settings-grid">
         <div class="settings-card heroui-card">
           <div class="settings-card-head">
-            <span class="platform-icon">🐦</span>
+            <span class="platform-icon">${uiIcon("twitter", 22)}</span>
             <div>
               <h3>X (Twitter)</h3>
               <p class="hint">Khuyến nghị dùng Cookie để không phát sinh chi phí gói API $100/tháng.</p>
@@ -1218,11 +1238,11 @@ export function settingsPage(config: AppConfig, notice?: string): string {
           </div>
           <label class="heroui-label">Cookie auth_token
             <input class="heroui-input" type="password" name="TWITTER_AUTH_TOKEN" value="${escapeHtml(config.TWITTER_AUTH_TOKEN)}" placeholder="F12 -> Cookies -> auth_token" />
-            ${config.TWITTER_AUTH_TOKEN.trim() ? `<span style="display:block; margin-top:4px; color:var(--heroui-success); font-size:0.78rem; font-weight:600;">✓ Đã lưu (${config.TWITTER_AUTH_TOKEN.trim().length} ký tự)</span>` : `<span style="display:block; margin-top:4px; color:var(--heroui-danger); font-size:0.78rem;">⚠️ Chưa có - Lấy từ F12 -> Cookies -> auth_token</span>`}
+            ${config.TWITTER_AUTH_TOKEN.trim() ? `<span style="display:block; margin-top:4px; color:var(--heroui-success); font-size:0.78rem; font-weight:600;">${uiIcon("check", 12)} Đã lưu (${config.TWITTER_AUTH_TOKEN.trim().length} ký tự)</span>` : `<span style="display:block; margin-top:4px; color:var(--heroui-danger); font-size:0.78rem;">${uiIcon("alert", 12)} Chưa có - Lấy từ F12 -> Cookies -> auth_token</span>`}
           </label>
           <label class="heroui-label">Cookie ct0 (CSRF token)
             <input class="heroui-input" type="password" name="TWITTER_CT0" value="${escapeHtml(config.TWITTER_CT0)}" placeholder="F12 -> Cookies -> ct0" />
-            ${config.TWITTER_CT0.trim() ? `<span style="display:block; margin-top:4px; color:var(--heroui-success); font-size:0.78rem; font-weight:600;">✓ Đã lưu (${config.TWITTER_CT0.trim().length} ký tự)</span>` : `<span style="display:block; margin-top:4px; color:var(--heroui-danger); font-size:0.78rem; font-weight:600;">⚠️ Chưa có - Bắt buộc cần ct0 để quét bài trên X</span>`}
+            ${config.TWITTER_CT0.trim() ? `<span style="display:block; margin-top:4px; color:var(--heroui-success); font-size:0.78rem; font-weight:600;">${uiIcon("check", 12)} Đã lưu (${config.TWITTER_CT0.trim().length} ký tự)</span>` : `<span style="display:block; margin-top:4px; color:var(--heroui-danger); font-size:0.78rem; font-weight:600;">${uiIcon("alert", 12)} Chưa có - Bắt buộc cần ct0 để quét bài trên X</span>`}
           </label>
           <label class="heroui-label">Hoặc Bearer Token X API v2 (Nếu có)
             <input class="heroui-input" type="password" name="X_BEARER_TOKEN" value="${escapeHtml(config.X_BEARER_TOKEN)}" placeholder="Bearer token chính thức..." />
@@ -1231,7 +1251,7 @@ export function settingsPage(config: AppConfig, notice?: string): string {
 
         <div class="settings-card heroui-card">
           <div class="settings-card-head">
-            <span class="platform-icon">👤</span>
+            <span class="platform-icon">${uiIcon("facebook", 22)}</span>
             <div>
               <h3>Facebook Fanpage & Group</h3>
               <p class="hint">Khuyến nghị dùng Cookie để đọc bài viết công khai không cần App Review phức tạp.</p>
@@ -1239,7 +1259,7 @@ export function settingsPage(config: AppConfig, notice?: string): string {
           </div>
           <label class="heroui-label">Cookie Facebook (c_user & xs)
             <textarea class="heroui-textarea" name="FACEBOOK_COOKIE" rows="3" placeholder="c_user=...; xs=...;">${escapeHtml(config.FACEBOOK_COOKIE)}</textarea>
-            ${config.FACEBOOK_COOKIE.trim() ? `<span style="display:block; margin-top:4px; color:var(--heroui-success); font-size:0.78rem; font-weight:600;">✓ Đã lưu (${config.FACEBOOK_COOKIE.trim().length} ký tự)</span>` : `<span style="display:block; margin-top:4px; color:var(--heroui-danger); font-size:0.78rem;">Chưa cấu hình</span>`}
+            ${config.FACEBOOK_COOKIE.trim() ? `<span style="display:block; margin-top:4px; color:var(--heroui-success); font-size:0.78rem; font-weight:600;">${uiIcon("check", 12)} Đã lưu (${config.FACEBOOK_COOKIE.trim().length} ký tự)</span>` : `<span style="display:block; margin-top:4px; color:var(--heroui-danger); font-size:0.78rem;">Chưa cấu hình</span>`}
           </label>
           <label class="heroui-label">Hoặc Page Access Token (Nếu có)
             <input class="heroui-input" type="password" name="FACEBOOK_ACCESS_TOKEN" value="${escapeHtml(config.FACEBOOK_ACCESS_TOKEN)}" placeholder="Token Graph API..." />
@@ -1248,7 +1268,7 @@ export function settingsPage(config: AppConfig, notice?: string): string {
 
         <div class="settings-card heroui-card">
           <div class="settings-card-head">
-            <span class="platform-icon">🧵</span>
+            <span class="platform-icon">${uiIcon("threads", 22)}</span>
             <div>
               <h3>Meta Threads & YouTube</h3>
               <p class="hint">Tích hợp đa nguồn dữ liệu mạng xã hội.</p>
@@ -1264,7 +1284,7 @@ export function settingsPage(config: AppConfig, notice?: string): string {
 
         <div class="settings-card heroui-card">
           <div class="settings-card-head">
-            <span class="platform-icon">🤖</span>
+            <span class="platform-icon">${uiIcon("bot", 22)}</span>
             <div>
               <h3>Trí tuệ Nhân tạo & Tóm tắt AI</h3>
               <p class="hint">Hỗ trợ Anthropic Claude, OpenAI, Gemini, Groq, Ollama.</p>
@@ -1283,7 +1303,7 @@ export function settingsPage(config: AppConfig, notice?: string): string {
 
         <div class="settings-card heroui-card">
           <div class="settings-card-head">
-            <span class="platform-icon">🔔</span>
+            <span class="platform-icon">${uiIcon("bell", 22)}</span>
             <div>
               <h3>Thông báo Cảnh báo & Webhook</h3>
               <p class="hint">Nhận thông báo tức thời qua Discord, Slack, Telegram khi có khủng hoảng.</p>
@@ -1300,7 +1320,7 @@ export function settingsPage(config: AppConfig, notice?: string): string {
 
         <div class="settings-card heroui-card">
           <div class="settings-card-head">
-            <span class="platform-icon">⏱️</span>
+            <span class="platform-icon">${uiIcon("clock", 22)}</span>
             <div>
               <h3>Chu kỳ Quét tự động & Giới hạn</h3>
               <p class="hint">Tần suất làm mới dữ liệu chạy ngầm.</p>
@@ -1316,7 +1336,7 @@ export function settingsPage(config: AppConfig, notice?: string): string {
       </div>
 
       <div class="settings-footer-actions">
-        <button class="btn btn-primary btn-lg" type="submit">💾 Lưu cấu hình hệ thống</button>
+        <button class="btn btn-primary btn-lg" type="submit">${uiIcon("save")} Lưu cấu hình hệ thống</button>
         <span class="hint text-muted">Cấu hình được lưu vào SQLite và áp dụng ngay lập tức mà không cần khởi động lại dịch vụ.</span>
       </div>
     </form>
@@ -1357,19 +1377,19 @@ function renderNavbar(activeTab: string): string {
       </div>
 
       <nav class="navbar-nav">
-        <a class="nav-item ${activeTab === "dashboard" ? "active" : ""}" href="/">📊 Tổng quan</a>
-        <a class="nav-item ${activeTab === "brief" ? "active" : ""}" href="/brief">📑 Báo cáo AI</a>
-        <a class="nav-item ${activeTab === "hashtags" ? "active" : ""}" href="/hashtags">🔥 Xu hướng</a>
-        <a class="nav-item ${activeTab === "compare" ? "active" : ""}" href="/compare">⚖️ So sánh</a>
-        <a class="nav-item ${activeTab === "settings" ? "active" : ""}" href="/settings">🔌 Cấu hình</a>
+        <a class="nav-item ${activeTab === "dashboard" ? "active" : ""}" href="/">${uiIcon("dashboard")} Tổng quan</a>
+        <a class="nav-item ${activeTab === "brief" ? "active" : ""}" href="/brief">${uiIcon("report")} Báo cáo AI</a>
+        <a class="nav-item ${activeTab === "hashtags" ? "active" : ""}" href="/hashtags">${uiIcon("flame")} Xu hướng</a>
+        <a class="nav-item ${activeTab === "compare" ? "active" : ""}" href="/compare">${uiIcon("compare")} So sánh</a>
+        <a class="nav-item ${activeTab === "settings" ? "active" : ""}" href="/settings">${uiIcon("settings")} Cấu hình</a>
       </nav>
 
       <div class="navbar-actions">
         <form method="post" action="/listen" style="display:inline-block; margin:0;">
-          <button class="btn btn-sm btn-primary" type="submit" title="Quét tin tức mới ngay trên tất cả các kênh">🔄 Quét tin</button>
+          <button class="btn btn-sm btn-primary" type="submit" title="Quét tin tức mới ngay trên tất cả các kênh">${uiIcon("refresh")} Quét tin</button>
         </form>
         <form method="post" action="/logout" style="display:inline-block; margin:0;">
-          <button class="btn btn-sm btn-outline" type="submit" title="Đăng xuất khỏi hệ thống">Đăng xuất</button>
+          <button class="btn btn-sm btn-outline" type="submit" title="Đăng xuất khỏi hệ thống">${uiIcon("logout")} Đăng xuất</button>
         </form>
       </div>
     </div>
@@ -2771,7 +2791,48 @@ function layout(title: string, body: string, activeTab = "dashboard"): string {
       border-bottom: 1px solid var(--line);
     }
     .platform-icon {
-      font-size: 1.8rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 42px;
+      height: 42px;
+      border-radius: var(--radius-md);
+      background: var(--heroui-primary-50);
+      color: var(--heroui-primary);
+      flex-shrink: 0;
+    }
+
+    /* SVG VECTOR ICONS (HEROUI / LUCIDE STYLE) */
+    .ui-icon {
+      display: inline-block;
+      vertical-align: -0.16em;
+      flex-shrink: 0;
+    }
+    .btn .ui-icon, .nav-item .ui-icon, .heroui-chip .ui-icon {
+      margin-right: 5px;
+    }
+    .btn-icon .ui-icon {
+      margin: 0;
+    }
+    .stat-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      margin-right: 5px;
+      vertical-align: middle;
+    }
+    .stat-dot.pos { background: var(--heroui-success); }
+    .stat-dot.neg { background: var(--heroui-danger); }
+    .stat-dot.neu { background: #a1a1aa; }
+
+    .stats-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+    }
+    .stats-item .ui-icon {
+      vertical-align: middle;
     }
     .settings-card-head h3 {
       margin: 0;
