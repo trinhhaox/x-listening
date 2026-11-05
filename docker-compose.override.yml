@@ -1,5 +1,5 @@
-# Server-only: Caddy (proxy-caddy) reaches apps via the docker0 gateway (172.17.0.1)
+# Server-only: Caddy (proxy-caddy) and external access reach apps via port 3028
 services:
   app:
     ports: !override
-      - "172.17.0.1:3028:3021"
+      - "3028:3021"
