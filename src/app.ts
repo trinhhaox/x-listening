@@ -345,7 +345,7 @@ export function createApp(config: AppConfig, store: Store) {
       : "x";
     const phrase = String(body.phrase ?? "").trim().slice(0, 80);
     const exclude = body.exclude_reposts === "on" || body.exclude_reposts === "true";
-    if (!name) return c.redirect("/?notice=" + encodeURIComponent("Thiếu tên tần số."));
+    if (!name) return c.redirect("/?notice=" + encodeURIComponent("Thiếu tên nguồn theo dõi."));
     let query = rawQuery.replace(/\s+/g, " ").trim();
     if (!query) {
       return c.redirect("/?notice=" + encodeURIComponent("Câu truy vấn, từ khóa hoặc link không được để trống."));
@@ -378,7 +378,7 @@ export function createApp(config: AppConfig, store: Store) {
       phrase: source === "facebook" || source === "threads" ? phrase : "",
       createdAt: new Date().toISOString(),
     });
-    return c.redirect("/?notice=" + encodeURIComponent(`Đã thêm tần số “${name}”.`));
+    return c.redirect("/?notice=" + encodeURIComponent(`Đã thêm nguồn theo dõi “${name}”.`));
   });
 
   app.post("/topics/:id/toggle", (c) => {
@@ -389,23 +389,23 @@ export function createApp(config: AppConfig, store: Store) {
 
   app.post("/topics/:id/backfill", async (c) => {
     const id = c.req.param("id");
-    if (!safeKey(id) || !store.getTopic(id)) return c.redirect(deskPath("", "wire", "Không còn tần số này."));
+    if (!safeKey(id) || !store.getTopic(id)) return c.redirect(deskPath("", "wire", "Không tìm thấy nguồn theo dõi này."));
     const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const report = await runListen({ onlyTopicId: id, startTime: start });
-    const notice = [`Ghi ${report.saved} bài trong 7 ngày.`, ...report.errors].filter(Boolean).join(" ");
+    const notice = [`Ghi nhận ${report.saved} bài trong 7 ngày qua.`, ...report.errors].filter(Boolean).join(" ");
     return c.redirect(deskPath("", "wire", notice));
   });
 
   app.post("/topics/:id/delete", (c) => {
     store.deleteTopic(c.req.param("id"));
-    return c.redirect("/?notice=" + encodeURIComponent("Đã gỡ tần số."));
+    return c.redirect("/?notice=" + encodeURIComponent("Đã xóa nguồn theo dõi."));
   });
 
   app.post("/listen", async (c) => {
     const report = await runListen();
     const notice = report.errors.length
-      ? `Ghi ${report.saved} bài trên ${report.topics} tần số. ${report.errors.join(" ")}`
-      : `Đã nghe ${report.topics} tần số, ghi ${report.saved} bài.`;
+      ? `Ghi nhận ${report.saved} bài từ ${report.topics} nguồn theo dõi. ${report.errors.join(" ")}`
+      : `Đã quét ${report.topics} nguồn theo dõi, ghi nhận ${report.saved} bài viết mới.`;
     return c.redirect("/?notice=" + encodeURIComponent(notice));
   });
 
