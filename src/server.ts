@@ -8,7 +8,15 @@ const store = Store.open(config.DATABASE_PATH);
 const { app, runListen } = createApp(config, store);
 
 const timer = setInterval(() => {
-  if (!config.X_BEARER_TOKEN.trim() && !config.FACEBOOK_ACCESS_TOKEN.trim() && !config.THREADS_ACCESS_TOKEN.trim() && !config.YOUTUBE_API_KEY.trim()) return;
+  const hasAnyAuth = Boolean(
+    config.X_BEARER_TOKEN.trim() ||
+      (config.TWITTER_AUTH_TOKEN.trim() && config.TWITTER_CT0.trim()) ||
+      config.FACEBOOK_ACCESS_TOKEN.trim() ||
+      config.FACEBOOK_COOKIE.trim() ||
+      config.THREADS_ACCESS_TOKEN.trim() ||
+      config.YOUTUBE_API_KEY.trim(),
+  );
+  if (!hasAnyAuth) return;
   runListen()
     .then((report) => {
       if (report.saved || report.errors.length) {

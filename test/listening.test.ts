@@ -11,6 +11,8 @@ import { threadsUserKey } from "../src/threads.js";
 import { searchRecentPosts } from "../src/xapi.js";
 import { deliverHit, webhookTarget, buildWebhookPayload, deliverExecutiveReport } from "../src/notify.js";
 import { generateAiBrief, analyzePostWithAi } from "../src/ai.js";
+import { searchXWithCookie } from "../src/xcookie.js";
+import { scrapeFacebookPageWithCookie } from "../src/fbcookie.js";
 import { listenOnce, PAGE_CAP } from "../src/listen.js";
 import { buildSearchQuery } from "../src/query.js";
 import { classifySentiment } from "../src/sentiment.js";
@@ -22,7 +24,10 @@ function testConfig(): AppConfig {
     DATABASE_PATH: ":memory:",
     ADMIN_PASSWORD: "mat-khau-dai",
     X_BEARER_TOKEN: "",
+    TWITTER_AUTH_TOKEN: "",
+    TWITTER_CT0: "",
     FACEBOOK_ACCESS_TOKEN: "",
+    FACEBOOK_COOKIE: "",
     THREADS_ACCESS_TOKEN: "",
     YOUTUBE_API_KEY: "",
     LISTEN_INTERVAL_MINUTES: 15,
@@ -1142,4 +1147,180 @@ test("API POST /api/reports/send gửi báo cáo thành công", async () => {
     globalThis.fetch = originalFetch;
     store.close();
   }
+});
+
+test("searchXWithCookie tìm kiếm bài viết bằng cookie web X (không cần developer api)", async () => {
+  const mockFetch: typeof fetch = async (input, init) => {
+    const headers = init?.headers as Record<string, string>;
+    assert.match(headers.cookie, /auth_token=mock_auth/);
+    assert.match(headers["x-csrf-token"], /mock_ct0/);
+
+    const mockResponse = {
+      data: {
+        search_by_raw_query: {
+          search_timeline: {
+            timeline: {
+              instructions: [
+                {
+                  entries: [
+                    {
+                      content: {
+                        itemContent: {
+                          tweet_results: {
+                            result: {
+                              rest_id: "1899999999999999999",
+                              legacy: {
+                                full_text: "Cà phê giấy hôm nay uống rất vừa miệng!",
+                                created_at: "Wed Oct 14 07:00:00 +0000 2026",
+                                favorite_count: 25,
+                                retweet_count: 3,
+                                reply_count: 2,
+                                lang: "vi",
+                              },
+                              core: {
+                                user_results: {
+                                  result: {
+                                    legacy: {
+                                      screen_name: "nguoitieudung",
+                                      name: "Người Tiêu Dùng",
+                                    },
+                                  },
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+
+    return new Response(JSON.stringify(mockResponse), { status: 200 });
+  };
+
+  const posts = await searchXWithCookie({
+    authToken: "mock_auth",
+    ct0: "mock_ct0",
+    query: "cà phê giấy",
+    fetchImpl: mockFetch,
+  });
+
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0]?.id, "1899999999999999999");
+  assert.equal(posts[0]?.authorUsername, "nguoitieudung");
+  assert.equal(posts[0]?.likeCount, 25);
+  assert.match(posts[0]?.text ?? "", /vừa miệng/);
+});
+
+test("scrapeFacebookPageWithCookie cào bài viết Fanpage qua mbasic (không cần app review)", async () => {
+  const mockHtml = `
+    <html>
+      <body>
+        <div id="m_story_1">
+          <a href="/story.php?story_fbid=9876543210&id=1000123">Chi tiết</a>
+          <div>Cà phê giấy khai trương cơ sở mới tại quận 1, giảm giá 30% hôm nay!</div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  const mockFetch: typeof fetch = async () =>
+    new Response(mockHtml, { status: 200, headers: { "content-type": "text/html" } });
+
+  const posts = await scrapeFacebookPageWithCookie({
+    cookie: "c_user=123; xs=abc;",
+    pageKey: "quan_cafe_giay",
+    phrase: "giảm giá",
+    fetchImpl: mockFetch,
+  });
+
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0]?.id, "fb_9876543210");
+  assert.equal(posts[0]?.authorUsername, "quan_cafe_giay");
+  assert.match(posts[0]?.text ?? "", /giảm giá 30%/);
+});
+
+test("listenOnce tự động chạy chế độ cookie khi không có API token", async () => {
+  const store = Store.open(":memory:");
+  store.insertTopic({
+    id: "tx1",
+    name: "Quán X Cookie",
+    query: "cafe",
+    source: "x",
+    phrase: "",
+    excludeReposts: false,
+    createdAt: "2026-10-14T00:00:00.000Z",
+  });
+
+  const mockFetch: typeof fetch = async () => {
+    return new Response(
+      JSON.stringify({
+        data: {
+          search_by_raw_query: {
+            search_timeline: {
+              timeline: {
+                instructions: [
+                  {
+                    entries: [
+                      {
+                        content: {
+                          itemContent: {
+                            tweet_results: {
+                              result: {
+                                rest_id: "1899999999999999998",
+                                legacy: {
+                                  full_text: "Quán mới decor đẹp lắm",
+                                  created_at: "Wed Oct 14 08:00:00 +0000 2026",
+                                  favorite_count: 10,
+                                  retweet_count: 1,
+                                  lang: "vi",
+                                },
+                                core: {
+                                  user_results: {
+                                    result: {
+                                      legacy: {
+                                        screen_name: "khachhang",
+                                        name: "Khách Hàng",
+                                      },
+                                    },
+                                  },
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        },
+      }),
+      { status: 200 },
+    );
+  };
+
+  const report = await listenOnce(store, {
+    token: "",
+    twitterAuthToken: "mock_auth",
+    twitterCt0: "mock_ct0",
+    maxResults: 10,
+    fetchImpl: mockFetch,
+  });
+
+  assert.equal(report.errors.length, 0);
+  assert.equal(report.saved, 1);
+  const mention = store.listMentions()[0];
+  assert.equal(mention?.id, "1899999999999999998");
+  assert.equal(mention?.author_username, "khachhang");
+
+  store.close();
 });

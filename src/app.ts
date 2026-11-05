@@ -29,7 +29,10 @@ export function createApp(config: AppConfig, store: Store) {
     try {
       const report = await listenOnce(store, {
         token: config.X_BEARER_TOKEN,
+        twitterAuthToken: config.TWITTER_AUTH_TOKEN,
+        twitterCt0: config.TWITTER_CT0,
         facebookToken: config.FACEBOOK_ACCESS_TOKEN,
+        facebookCookie: config.FACEBOOK_COOKIE,
         threadsToken: config.THREADS_ACCESS_TOKEN,
         youtubeApiKey: config.YOUTUBE_API_KEY,
         maxResults: config.SEARCH_MAX_RESULTS,
@@ -144,8 +147,8 @@ export function createApp(config: AppConfig, store: Store) {
         assignedToFilter: assignedTo,
         tagFilter: tag,
         templates: store.listTemplates(),
-        hasToken: Boolean(config.X_BEARER_TOKEN.trim()),
-        hasFacebook: Boolean(config.FACEBOOK_ACCESS_TOKEN.trim()),
+        hasToken: Boolean(config.X_BEARER_TOKEN.trim() || (config.TWITTER_AUTH_TOKEN.trim() && config.TWITTER_CT0.trim())),
+        hasFacebook: Boolean(config.FACEBOOK_ACCESS_TOKEN.trim() || config.FACEBOOK_COOKIE.trim()),
         hasThreads: Boolean(config.THREADS_ACCESS_TOKEN.trim()),
         hasYoutube: Boolean(config.YOUTUBE_API_KEY.trim()),
         notice,

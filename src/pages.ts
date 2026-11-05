@@ -245,8 +245,8 @@ export function dashboardPage(model: DashboardModel): string {
     </header>
     ${model.notice ? `<p class="notice">${escapeHtml(model.notice)}</p>` : ""}
     ${model.spike ? `<p class="notice">Đột biến: ${escapeHtml(model.spike)}</p>` : ""}
-    ${model.hasToken ? "" : `<p class="notice">Chưa có X_BEARER_TOKEN. Bàn nghe mở được, nhưng chưa hỏi được X. Gắn token trong file .env rồi chạy lại.</p>`}
-    ${model.hasFacebook ? "" : `<p class="notice">Chưa có FACEBOOK_ACCESS_TOKEN. Tần số Facebook cần token đọc Trang trong file .env.</p>`}
+    ${model.hasToken ? "" : `<p class="notice">Chưa có X_BEARER_TOKEN hoặc cookie (TWITTER_AUTH_TOKEN & TWITTER_CT0). Gắn cấu hình trong file .env.</p>`}
+    ${model.hasFacebook ? "" : `<p class="notice">Chưa có FACEBOOK_ACCESS_TOKEN hoặc FACEBOOK_COOKIE. Gắn token hoặc cookie đọc Trang trong file .env.</p>`}
     <section class="meters">
       <div><span>24 giờ</span><strong>${model.stats.mentions}</strong><small>bài</small></div>
       <div><span>người viết</span><strong>${model.stats.authors}</strong><small>tài khoản</small></div>

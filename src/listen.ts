@@ -3,6 +3,8 @@ import { buildSearchQuery } from "./query.js";
 import { searchRecentPosts } from "./xapi.js";
 import { listThreadsPosts } from "./threads.js";
 import { searchYoutubeVideos } from "./youtube.js";
+import { searchXWithCookie } from "./xcookie.js";
+import { scrapeFacebookPageWithCookie } from "./fbcookie.js";
 import type { Store, Topic } from "./db.js";
 import { muteKey } from "./db.js";
 
@@ -18,7 +20,10 @@ export async function listenOnce(
   store: Store,
   options: {
     token: string;
+    twitterAuthToken?: string;
+    twitterCt0?: string;
     facebookToken?: string;
+    facebookCookie?: string;
     threadsToken?: string;
     youtubeApiKey?: string;
     maxResults: number;
@@ -42,11 +47,14 @@ export async function listenOnce(
   let saved = 0;
   const muted = new Set(store.listMuted());
 
-  if (xTopics.length > 0 && !options.token.trim()) {
-    errors.push("Chưa có X_BEARER_TOKEN trong môi trường.");
+  const hasXAuth = Boolean(options.token.trim() || (options.twitterAuthToken?.trim() && options.twitterCt0?.trim()));
+  const hasFbAuth = Boolean(options.facebookToken?.trim() || options.facebookCookie?.trim());
+
+  if (xTopics.length > 0 && !hasXAuth) {
+    errors.push("Chưa có X_BEARER_TOKEN hoặc (TWITTER_AUTH_TOKEN và TWITTER_CT0) trong môi trường.");
   }
-  if (fbTopics.length > 0 && !options.facebookToken?.trim()) {
-    errors.push("Chưa có FACEBOOK_ACCESS_TOKEN trong môi trường.");
+  if (fbTopics.length > 0 && !hasFbAuth) {
+    errors.push("Chưa có FACEBOOK_ACCESS_TOKEN hoặc FACEBOOK_COOKIE trong môi trường.");
   }
   if (threadsTopics.length > 0 && !options.threadsToken?.trim()) {
     errors.push("Chưa có THREADS_ACCESS_TOKEN trong môi trường.");
@@ -56,13 +64,24 @@ export async function listenOnce(
   }
 
   for (const topic of xTopics) {
-    if (!options.token.trim()) continue;
+    if (!hasXAuth) continue;
     try {
       const query = buildSearchQuery(topic.query, topic.exclude_reposts === 1);
-      const pulled = await pullPages(store, topic.id, query, topic.since_id, muted, {
-        ...options,
-        now,
-      });
+      let pulled: { saved: number; newest: string | null; incomplete: boolean };
+      if (options.token.trim()) {
+        pulled = await pullPages(store, topic.id, query, topic.since_id, muted, {
+          ...options,
+          now,
+        });
+      } else {
+        pulled = await pullPagesWithCookie(store, topic.id, query, topic.since_id, muted, {
+          twitterAuthToken: options.twitterAuthToken ?? "",
+          twitterCt0: options.twitterCt0 ?? "",
+          maxResults: options.maxResults,
+          now,
+          fetchImpl: options.fetchImpl,
+        });
+      }
       saved += pulled.saved;
       finishTopic(store, topic, pulled, errors, now, (newest) => newerSnowflake(topic.since_id, newest));
     } catch (error) {
@@ -71,9 +90,18 @@ export async function listenOnce(
   }
 
   for (const topic of fbTopics) {
-    if (!options.facebookToken?.trim()) continue;
+    if (!hasFbAuth) continue;
     try {
-      const pulled = await pullFacebook(store, topic, muted, { ...options, facebookToken: options.facebookToken, now });
+      let pulled: { saved: number; newest: string | null; incomplete: boolean };
+      if (options.facebookToken?.trim()) {
+        pulled = await pullFacebook(store, topic, muted, { ...options, facebookToken: options.facebookToken, now });
+      } else {
+        pulled = await pullFacebookWithCookie(store, topic, muted, {
+          facebookCookie: options.facebookCookie ?? "",
+          now,
+          fetchImpl: options.fetchImpl,
+        });
+      }
       saved += pulled.saved;
       finishTopic(store, topic, pulled, errors, now, (newest) => newerUnix(topic.since_id, newest));
     } catch (error) {
@@ -372,4 +400,99 @@ function newerSnowflake(current: string | null, incoming: string | null): string
   if (!incoming || !/^\d+$/.test(incoming)) return current;
   if (!current || !/^\d+$/.test(current)) return incoming;
   return BigInt(incoming) > BigInt(current) ? incoming : current;
+}
+
+async function pullPagesWithCookie(
+  store: Store,
+  topicId: string,
+  query: string,
+  sinceId: string | null,
+  muted: Set<string>,
+  options: {
+    twitterAuthToken: string;
+    twitterCt0: string;
+    maxResults: number;
+    now: Date;
+    fetchImpl?: typeof fetch;
+  },
+): Promise<{ saved: number; newest: string | null; incomplete: boolean }> {
+  let newest: string | null = null;
+  let saved = 0;
+  const posts = await searchXWithCookie({
+    authToken: options.twitterAuthToken,
+    ct0: options.twitterCt0,
+    query,
+    count: options.maxResults,
+    fetchImpl: options.fetchImpl,
+  });
+
+  for (const post of posts) {
+    if (!/^\d+$/.test(post.id)) continue;
+    newest = newerSnowflake(newest, post.id);
+    const username = post.authorUsername.replace(/[^\w.]/g, "").slice(0, 32) || "unknown";
+    if (muted.has(muteKey(username) ?? "")) continue;
+    const wrote = store.insertMention(
+      {
+        id: post.id,
+        topicId,
+        text: post.text.slice(0, 2000),
+        authorUsername: username,
+        authorName: post.authorName.slice(0, 80),
+        createdAt: post.createdAt,
+        lang: post.lang.slice(0, 12),
+        likeCount: post.likeCount,
+        repostCount: post.repostCount,
+        replyCount: post.replyCount,
+        quoteCount: post.quoteCount,
+        url: post.url,
+      },
+      options.now.toISOString(),
+    );
+    if (wrote) saved += 1;
+  }
+
+  return { saved, newest, incomplete: false };
+}
+
+async function pullFacebookWithCookie(
+  store: Store,
+  topic: Topic,
+  muted: Set<string>,
+  options: {
+    facebookCookie: string;
+    now: Date;
+    fetchImpl?: typeof fetch;
+  },
+): Promise<{ saved: number; newest: string | null; incomplete: boolean }> {
+  let saved = 0;
+  const posts = await scrapeFacebookPageWithCookie({
+    cookie: options.facebookCookie,
+    pageKey: topic.query,
+    phrase: topic.phrase || undefined,
+    fetchImpl: options.fetchImpl,
+  });
+
+  for (const post of posts) {
+    if (muted.has(muteKey(post.authorUsername) ?? "")) continue;
+    const wrote = store.insertMention(
+      {
+        id: post.id,
+        topicId: topic.id,
+        text: post.text.slice(0, 2000),
+        authorUsername: post.authorUsername.slice(0, 32),
+        authorName: post.authorName.slice(0, 80),
+        createdAt: post.createdAt,
+        lang: post.lang,
+        likeCount: post.likeCount,
+        repostCount: post.repostCount,
+        replyCount: post.replyCount,
+        quoteCount: post.quoteCount,
+        url: post.url,
+      },
+      options.now.toISOString(),
+    );
+    if (wrote) saved += 1;
+  }
+
+  return { saved, newest: topic.since_id, incomplete: false };
 }

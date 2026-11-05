@@ -13,11 +13,16 @@ npm run dev            # http://127.0.0.1:3021
 ```
 
 Chưa có token vẫn vào được bàn nghe. Nút **Nạp tin mẫu** tạo vài bài giả có dấu **Mẫu** để xem bố cục. Muốn nghe nền tảng nào, điền cấu hình tương ứng trong file `.env`:
-- `X_BEARER_TOKEN`: quyền đọc recent search trên X.
-- `FACEBOOK_ACCESS_TOKEN`: token đọc được Trang Facebook.
-- `THREADS_ACCESS_TOKEN`: token Threads Graph API.
-- `YOUTUBE_API_KEY`: API key cho YouTube Data API v3.
-- `LLM_API_KEY`: token để bật Tóm tắt Điều hành AI và Phân tích bài viết sâu.
+- **Không cần đăng ký App/Developer (Phương pháp Session Cookie):**
+  - `TWITTER_AUTH_TOKEN` & `TWITTER_CT0`: Cookie trình duyệt sau khi đăng nhập `x.com`. Miễn phí 100%, không cần gói $100/tháng của X API v2.
+  - `FACEBOOK_COOKIE`: Chuỗi cookie trình duyệt (chứa `c_user` và `xs`) để đọc bài viết từ các Fanpage công khai qua `mbasic.facebook.com` mà không cần App Review.
+- **Hoặc dùng API chính thức (nếu có tài khoản Developer):**
+  - `X_BEARER_TOKEN`: quyền đọc recent search trên X.
+  - `FACEBOOK_ACCESS_TOKEN`: token đọc được Trang Facebook.
+- **Các nền tảng khác:**
+  - `THREADS_ACCESS_TOKEN`: token Threads Graph API.
+  - `YOUTUBE_API_KEY`: API key cho YouTube Data API v3.
+  - `LLM_API_KEY`: token để bật Tóm tắt Điều hành AI và Phân tích bài viết sâu.
 
 ## Cách đặt tần số
 

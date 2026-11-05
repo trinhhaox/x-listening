@@ -11,3 +11,4 @@ ENV DATABASE_PATH=/app/data/listening.db PORT=3021 HOST=0.0.0.0
 EXPOSE 3021
 HEALTHCHECK --interval=30s --timeout=5s CMD wget -qO- http://127.0.0.1:3021/health || exit 1
 CMD ["node_modules/.bin/tsx", "src/server.ts"]
+
