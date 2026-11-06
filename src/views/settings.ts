@@ -55,6 +55,7 @@ export function settingsPage(
         <p class="text-muted">Cấu hình kết nối Mạng xã hội, Cookie phiên, Trí tuệ Nhân tạo AI và Nhận thông báo tự động</p>
       </div>
       <div class="page-header-actions">
+        <a class="btn btn-primary" href="/users">${uiIcon("shield")} Tài khoản & phân quyền</a>
         <a class="btn btn-outline" href="/">← Quay lại Tổng quan</a>
       </div>
     </div>

@@ -10,6 +10,7 @@ export type { AlertRule };
 import type { HitNotice } from "./notify.js";
 import { classifySentiment, type Sentiment } from "./sentiment.js";
 import { classifyMentionRuleBased } from "./ai.js";
+import type { Role } from "./users.js";
 import { isEncrypted, isSecretSetting, type SettingsCipher } from "./secrets.js";
 
 export type Topic = {
@@ -366,6 +367,14 @@ export class Store {
     return row ?? null;
   }
 
+  /** Gán bài cho người này nếu chưa có ai phụ trách. */
+  claimMention(topicId: string, mentionId: string, assignee: string): boolean {
+    const result = this.db
+      .prepare("UPDATE mentions SET assigned_to = ? WHERE topic_id = ? AND id = ? AND assigned_to = ''")
+      .run(assignee.slice(0, 60), topicId, mentionId);
+    return Number(result.changes) > 0;
+  }
+
   setMentionAssignee(topicId: string, mentionId: string, assignee: string): boolean {
     const result = this.db
       .prepare("UPDATE mentions SET assigned_to = ? WHERE topic_id = ? AND id = ?")
@@ -490,6 +499,61 @@ export class Store {
            AND fetched_at >= ? AND fetched_at < ?`,
       )
       .all(sinceIso, untilIso) as Array<{ queue: QueueState; assigned_to: string; fetched_at: string; done_at: string | null }>;
+  }
+
+  // ---- Tài khoản ----
+
+  listUsers(): UserRow[] {
+    return (this.db.prepare(`SELECT * FROM users ORDER BY active DESC, CASE role WHEN 'admin' THEN 0 WHEN 'editor' THEN 1 ELSE 2 END, name COLLATE NOCASE`).all() as unknown as UserRow[]).map(toUser);
+  }
+
+  getUser(id: string): UserRow | undefined {
+    const row = this.db.prepare("SELECT * FROM users WHERE id = ?").get(id) as unknown as UserRow | undefined;
+    return row ? toUser(row) : undefined;
+  }
+
+  getUserByPhone(phone: string): UserRow | undefined {
+    const row = this.db.prepare("SELECT * FROM users WHERE phone = ?").get(phone) as unknown as UserRow | undefined;
+    return row ? toUser(row) : undefined;
+  }
+
+  insertUser(input: { phone: string; name: string; role: Role; passwordHash: string; at: string }): UserRow {
+    const id = randomUUID();
+    this.db
+      .prepare("INSERT INTO users (id, phone, name, role, password_hash, active, session_version, created_at) VALUES (?, ?, ?, ?, ?, 1, 1, ?)")
+      .run(id, input.phone, input.name, input.role, input.passwordHash, input.at);
+    return this.getUser(id)!;
+  }
+
+  /** Đổi tên/số/vai trò/trạng thái. Hạ quyền hoặc khóa thì phiên đang mở bị đăng xuất. */
+  updateUser(id: string, changes: { name?: string; phone?: string; role?: Role; active?: boolean }): boolean {
+    const user = this.getUser(id);
+    if (!user) return false;
+    const next = {
+      name: changes.name ?? user.name,
+      phone: changes.phone ?? user.phone,
+      role: changes.role ?? user.role,
+      active: changes.active ?? user.active,
+    };
+    const revoke = next.role !== user.role || next.active !== user.active || next.phone !== user.phone;
+    this.db
+      .prepare("UPDATE users SET name = ?, phone = ?, role = ?, active = ?, session_version = session_version + ? WHERE id = ?")
+      .run(next.name, next.phone, next.role, next.active ? 1 : 0, revoke ? 1 : 0, id);
+    return true;
+  }
+
+  /** Đặt mật khẩu mới và đăng xuất mọi phiên cũ của người này. */
+  setUserPassword(id: string, passwordHash: string): boolean {
+    const result = this.db.prepare("UPDATE users SET password_hash = ?, session_version = session_version + 1 WHERE id = ?").run(passwordHash, id);
+    return Number(result.changes) > 0;
+  }
+
+  touchUserLogin(id: string, at: string): void {
+    this.db.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").run(at, id);
+  }
+
+  deleteUser(id: string): boolean {
+    return Number(this.db.prepare("DELETE FROM users WHERE id = ?").run(id).changes) > 0;
   }
 
   listMuted(): string[] {
@@ -1103,4 +1167,20 @@ function mentionFilter(view: MentionView): string {
   if (view === "starred") return "m.starred = 1 AND m.hidden = 0";
   if (view === "new" || view === "reading" || view === "done") return `m.hidden = 0 AND m.queue = '${view}'`;
   return "m.hidden = 0";
+}
+
+export type UserRow = {
+  id: string;
+  phone: string;
+  name: string;
+  role: Role;
+  password_hash: string;
+  active: boolean;
+  session_version: number;
+  created_at: string;
+  last_login_at: string | null;
+};
+
+function toUser(row: UserRow): UserRow {
+  return { ...row, active: Boolean(Number(row.active)), session_version: Number(row.session_version) };
 }

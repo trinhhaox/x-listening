@@ -15,6 +15,7 @@ import { registerAuthRoutes } from "./routes/auth.js";
 import { registerPagesRoutes } from "./routes/pages.js";
 import { registerActionsRoutes } from "./routes/actions.js";
 import { registerApiRoutes } from "./routes/api.js";
+import { registerUsersRoutes } from "./routes/users.js";
 
 export function createApp(config: AppConfig, store: Store) {
   const app = new Hono();
@@ -88,6 +89,7 @@ export function createApp(config: AppConfig, store: Store) {
   registerPagesRoutes(app, ctx);
   registerActionsRoutes(app, ctx);
   registerApiRoutes(app, ctx);
+  registerUsersRoutes(app, ctx);
 
   return { app, runListen };
 }

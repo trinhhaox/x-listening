@@ -9,10 +9,18 @@ import { lexiconWord } from "../sentiment.js";
 import { safeKey, isQueue, deskPath, backFrom } from "../http/helpers.js";
 import { getRuntimeConfig } from "../runtime_config.js";
 import type { AppContext } from "../http/context.js";
+import { OWNER, currentViewer } from "../users.js";
 
 /** Các nút bấm trên giao diện (form POST rồi chuyển hướng về trang). */
 export function registerActionsRoutes(app: Hono, ctx: AppContext): void {
   const { config, store, runListen, fanOutHits } = ctx;
+
+  /** Nhận việc: bài chưa ai phụ trách thì gán cho người vừa bấm đọc/xong (trừ chủ hệ thống và API). */
+  const claimIfUnassigned = (topicId: string, mentionId: string) => {
+    const viewer = currentViewer();
+    if (!viewer || viewer.id === OWNER.id) return;
+    store.claimMention(topicId, mentionId, viewer.name);
+  };
 
   app.post("/topics", async (c) => {
     const body = await c.req.parseBody();
@@ -181,7 +189,10 @@ export function registerActionsRoutes(app: Hono, ctx: AppContext): void {
     const mentionId = c.req.param("mentionId");
     const body = await c.req.parseBody();
     const queue = String(body.queue ?? "");
-    if (safeKey(topicId) && safeKey(mentionId) && isQueue(queue)) store.setMentionQueue(topicId, mentionId, queue);
+    if (safeKey(topicId) && safeKey(mentionId) && isQueue(queue)) {
+      store.setMentionQueue(topicId, mentionId, queue);
+      if (queue !== "new") claimIfUnassigned(topicId, mentionId);
+    }
     const back = await backFrom(c);
     return c.redirect(deskPath(back.topic, back.view, undefined, back));
   });
@@ -338,6 +349,7 @@ export function registerActionsRoutes(app: Hono, ctx: AppContext): void {
     store.setReplyDraft(topicId, mentionId, draft);
     if (op === "done") {
       store.setMentionQueue(topicId, mentionId, "done");
+      claimIfUnassigned(topicId, mentionId);
       notice = "Đã lưu câu trả lời và chuyển bài sang Đã xong.";
     } else if (op === "save") {
       notice = draft.trim() ? "Đã lưu nháp." : "Đã xóa nháp.";

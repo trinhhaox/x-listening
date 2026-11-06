@@ -1633,4 +1633,43 @@ export const STYLES = `    :root {
       .navbar-container { flex-wrap: wrap; }
       .navbar-brand { min-width: 0; }
       .navbar-actions { gap: 6px; }
-    }`;
+    }
+    /* ---- Tài khoản & phân quyền ---- */
+    .nav-user { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 10px; color: inherit; text-decoration: none; font-size: 13px; font-weight: 500; }
+    .nav-user:hover, .nav-user.active { background: var(--heroui-default-100, rgba(0,0,0,.05)); }
+    .role-chip { font-size: 11px; padding: 1px 8px; }
+    .role-chip.role-admin { background: rgba(124, 58, 237, .12); color: #6d28d9; }
+    .role-chip.role-editor { background: rgba(37, 99, 235, .12); color: #1d4ed8; }
+    .role-chip.role-viewer { background: rgba(100, 116, 139, .14); color: #475569; }
+    .login-hint { margin: -4px 0 4px; font-size: 12px; }
+    .account-grid { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+    .user-add-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; align-items: end; }
+    .role-legend { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 6px; font-size: 13px; color: var(--heroui-default-600, #555); }
+    .users-card { margin-top: 16px; }
+    .table-scroll { overflow-x: auto; }
+    .users-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .users-table th { text-align: left; font-weight: 600; padding: 8px; border-bottom: 1px solid var(--heroui-default-200, #e5e7eb); white-space: nowrap; }
+    .users-table td { padding: 8px; border-bottom: 1px solid var(--heroui-default-100, #f1f5f9); vertical-align: middle; }
+    .users-table td .heroui-input { min-width: 120px; }
+    .users-table tr.user-locked td { opacity: .6; }
+    .user-active { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .user-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .user-actions form { margin: 0; }
+    .user-reset { position: relative; }
+    .user-reset summary { list-style: none; cursor: pointer; }
+    .user-reset summary::-webkit-details-marker { display: none; }
+    .user-reset[open] form { display: flex; gap: 6px; margin-top: 6px; }
+    /* Ẩn nút không có quyền (máy chủ vẫn chặn nếu gửi thẳng). */
+    body[data-role="viewer"] main form[method="post"]:not([action="/account/password"]),
+    body[data-role="viewer"] .card-reply,
+    body:not([data-role="admin"]) #deck-admin-panel,
+    body:not([data-role="admin"]) .admin-only,
+    body:not([data-role="admin"]) form[action^="/topics"],
+    body:not([data-role="admin"]) form[action^="/alerts"]:not([action^="/alerts/hits"]),
+    body:not([data-role="admin"]) form[action^="/mutes"],
+    body:not([data-role="admin"]) form[action^="/templates"],
+    body:not([data-role="admin"]) form[action^="/lexicon"],
+    body:not([data-role="admin"]) form[action^="/samples"],
+    body:not([data-role="admin"]) form[action^="/sentiment"],
+    body:not([data-role="admin"]) form[action="/brief/send-webhook"] { display: none !important; }
+`;

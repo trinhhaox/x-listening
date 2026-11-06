@@ -126,6 +126,25 @@ export const MIGRATIONS: Migration[] = [
       ensureColumn(db, "mentions", "done_at", "done_at TEXT");
     },
   },
+  {
+    version: 5,
+    name: "tài khoản đăng nhập bằng số điện thoại, có vai trò",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS users (
+          id TEXT PRIMARY KEY,
+          phone TEXT NOT NULL UNIQUE,
+          name TEXT NOT NULL,
+          role TEXT NOT NULL DEFAULT 'viewer',
+          password_hash TEXT NOT NULL,
+          active INTEGER NOT NULL DEFAULT 1,
+          session_version INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          last_login_at TEXT
+        );
+      `);
+    },
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

@@ -270,7 +270,7 @@ export function dashboardPage(model: DashboardModel): string {
         <p class="text-muted">Theo dõi và phân tích cảm xúc thời gian thực trên Facebook, X, Threads, YouTube & Báo chí</p>
       </div>
       <div class="page-header-actions">
-        <button class="btn btn-outline" type="button" onclick="const p=document.getElementById('deck-admin-panel'); if(p){ p.open=!p.open; if(p.open) p.scrollIntoView({behavior:'smooth'}); }">${uiIcon("settings")} Nguồn theo dõi & Cảnh báo (${model.topics.length})</button>
+        <button class="btn btn-outline admin-only" type="button" onclick="const p=document.getElementById('deck-admin-panel'); if(p){ p.open=!p.open; if(p.open) p.scrollIntoView({behavior:'smooth'}); }">${uiIcon("settings")} Nguồn theo dõi & Cảnh báo (${model.topics.length})</button>
       </div>
     </div>
 
@@ -287,7 +287,7 @@ export function dashboardPage(model: DashboardModel): string {
         model.hasFacebook ? "" : 'Chưa có cấu hình Facebook Cookie. Vào mục <a href="/settings">Cấu hình kết nối</a> để thêm.',
       ].filter(Boolean);
       if (!items.length) return "";
-      return `<div class="deck-alert warning">${uiIcon("alert")}<div class="alert-lines">${items.map((item) => `<span>${item}</span>`).join("")}</div></div>`;
+      return `<div class="deck-alert warning admin-only">${uiIcon("alert")}<div class="alert-lines">${items.map((item) => `<span>${item}</span>`).join("")}</div></div>`;
     })()}
 
     <!-- KHU VỰC 1: RADAR TÌNH BÁO & CẢNH BÁO KHỦNG HOẢNG (NỬA TRÊN) -->
@@ -414,7 +414,7 @@ export function dashboardPage(model: DashboardModel): string {
           </select>
           <input class="heroui-input search-input" type="search" name="search" value="${escapeHtml(model.search ?? "")}" placeholder="Tìm nội dung, tác giả..." />
           <input class="heroui-input tag-input" type="text" name="tag" value="${escapeHtml(model.tagFilter ?? "")}" placeholder="Nhãn phân loại..." />
-          <input class="heroui-input assignee-input" type="text" name="assigned_to" value="${escapeHtml(model.assignedToFilter ?? "")}" placeholder="Người phụ trách..." />
+          <input class="heroui-input assignee-input" type="text" name="assigned_to" list="team-names" autocomplete="off" value="${escapeHtml(model.assignedToFilter ?? "")}" placeholder="Người phụ trách..." />
           <input class="heroui-input likes-input" type="number" name="min_likes" value="${model.minLikesFilter ?? ""}" min="0" placeholder="Lượt thích ≥" />
           <button class="btn btn-sm btn-primary" type="submit">${uiIcon("filter")} Lọc tin</button>
           ${
@@ -839,7 +839,7 @@ export function renderMentionCard(
         </form>
 
         <form class="inline-form" method="post" action="${action}/assign">${backFields}
-          <input class="heroui-input heroui-input-sm" name="assigned_to" maxlength="40" value="${escapeHtml(mention.assigned_to)}" placeholder="Gán người..." />
+          <input class="heroui-input heroui-input-sm" name="assigned_to" maxlength="40" list="team-names" autocomplete="off" value="${escapeHtml(mention.assigned_to)}" placeholder="Gán người..." />
           <button class="btn btn-xs btn-outline" type="submit">Gán</button>
         </form>
       </div>

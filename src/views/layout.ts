@@ -1,5 +1,6 @@
 import { uiIcon } from "../icons.js";
 import { STYLES } from "./styles.js";
+import { ROLE_LABELS, currentViewer, teamNames } from "../users.js";
 
 export function escapeHtml(value: string): string {
   return value
@@ -29,6 +30,9 @@ export function formatWhen(iso: string): string {
 
 function renderNavbar(activeTab: string): string {
   if (activeTab === "login") return "";
+  const viewer = currentViewer();
+  const isAdmin = !viewer || viewer.role === "admin";
+  const canWork = !viewer || viewer.role !== "viewer";
   return `
   <!-- HEROUI STICKY TOP NAVBAR (CỐ ĐỊNH, KHÔNG BAO GIỜ BỊ ĐÈ NỘI DUNG) -->
   <header class="deck-top-navbar">
@@ -47,19 +51,25 @@ function renderNavbar(activeTab: string): string {
         <a class="nav-item ${activeTab === "brief" ? "active" : ""}" href="/brief">${uiIcon("report")} Báo cáo AI</a>
         <a class="nav-item ${activeTab === "hashtags" ? "active" : ""}" href="/hashtags">${uiIcon("flame")} Xu hướng</a>
         <a class="nav-item ${activeTab === "compare" ? "active" : ""}" href="/compare">${uiIcon("compare")} So sánh</a>
-        <a class="nav-item ${activeTab === "settings" ? "active" : ""}" href="/settings">${uiIcon("settings")} Cấu hình</a>
+        ${isAdmin ? `<a class="nav-item ${activeTab === "settings" ? "active" : ""}" href="/settings">${uiIcon("settings")} Cấu hình</a>` : ""}
       </nav>
 
       <div class="navbar-actions">
-        <form method="post" action="/listen" style="display:inline-block; margin:0;">
+        ${canWork ? `<form method="post" action="/listen" style="display:inline-block; margin:0;">
           <button class="btn btn-sm btn-primary" type="submit" title="Quét tin tức mới ngay trên tất cả các kênh">${uiIcon("refresh")} Quét tin</button>
-        </form>
+        </form>` : ""}
+        ${viewer ? `<a class="nav-user${activeTab === "account" ? " active" : ""}" href="/account" title="Tài khoản của tôi">${uiIcon("user", 14)}<span class="btn-label"> ${escapeHtml(viewer.name)}</span> <span class="heroui-chip role-chip role-${viewer.role}">${ROLE_LABELS[viewer.role]}</span></a>` : ""}
         <form method="post" action="/logout" style="display:inline-block; margin:0;">
           <button class="btn btn-sm btn-outline" type="submit" title="Đăng xuất khỏi hệ thống" aria-label="Đăng xuất">${uiIcon("logout")}<span class="btn-label"> Đăng xuất</span></button>
         </form>
       </div>
     </div>
   </header>`;
+}
+
+function teamDatalist(): string {
+  const names = teamNames();
+  return names.length ? `<datalist id="team-names">${names.map((n) => `<option value="${escapeHtml(n)}"></option>`).join("")}</datalist>` : "";
 }
 
 export function layout(title: string, body: string, activeTab = "dashboard"): string {
@@ -76,11 +86,12 @@ export function layout(title: string, body: string, activeTab = "dashboard"): st
 ${STYLES}
   </style>
 </head>
-<body>
+<body data-role="${currentViewer()?.role ?? "admin"}">
   ${renderNavbar(activeTab)}
   <main>
     ${body}
   </main>
+  ${teamDatalist()}
 </body>
 </html>`;
 }
