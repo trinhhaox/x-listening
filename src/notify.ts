@@ -26,8 +26,36 @@ export function webhookTarget(raw: string): string | null {
   return null;
 }
 
+/**
+ * Telegram Bot API: https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>.
+ * Trả về chat_id khi địa chỉ đúng dạng đó, ngược lại null.
+ */
+export function telegramChatId(target: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(target);
+  } catch {
+    return null;
+  }
+  if (url.hostname.toLowerCase() !== "api.telegram.org") return null;
+  if (!/^\/bot[^/]+\/sendMessage$/.test(url.pathname)) return null;
+  const chatId = url.searchParams.get("chat_id")?.trim();
+  return chatId ? chatId : null;
+}
+
+function telegramPayload(chatId: string, text: string): unknown {
+  return { chat_id: chatId, text: text.slice(0, 4000), disable_web_page_preview: true };
+}
+
 export function buildWebhookPayload(target: string, hit: HitNotice): unknown {
   const url = target.toLowerCase();
+  const chatId = telegramChatId(target);
+  if (chatId) {
+    return telegramPayload(
+      chatId,
+      `🔔 Chuông: ${clip(hit.alertName, 80)}\n${clip(hit.reason, 160)}\nTần số: ${clip(hit.topicName, 80)} · Tác giả: ${clip(hit.authorName, 80)}\n\n${clip(hit.text, 280)}`,
+    );
+  }
   if (url.includes("discord.com/api/webhooks")) {
     return {
       content: `🔔 **Chuông:** ${clip(hit.alertName, 80)}`,
@@ -119,6 +147,8 @@ export type ExecutiveReportData = {
   newAuthors?: unknown[];
   starred?: unknown[];
   aiSummary?: string;
+  /** Tiêu đề thay cho "Báo cáo Dư luận Điều hành ngày …", ví dụ cho báo cáo tự động. */
+  title?: string;
 };
 
 export async function deliverExecutiveReport(
@@ -145,9 +175,16 @@ export async function deliverExecutiveReport(
   const url = target.toLowerCase();
 
   let payload: unknown;
-  if (url.includes("discord.com/api/webhooks")) {
+  const chatId = telegramChatId(target);
+  if (chatId) {
+    const title = brief.title ?? `Báo cáo Dư luận Điều hành ngày ${dayFormatted}`;
+    payload = telegramPayload(
+      chatId,
+      `📊 ${title}\n${statsSummary}${brief.aiSummary ? `\n\nTóm tắt Điều hành AI:\n${brief.aiSummary.trim().slice(0, 3000)}` : ""}`,
+    );
+  } else if (url.includes("discord.com/api/webhooks")) {
     payload = {
-      content: `📊 **Báo cáo Dư luận Điều hành ngày ${dayFormatted}**\n${statsSummary}`,
+      content: `📊 **${brief.title ?? `Báo cáo Dư luận Điều hành ngày ${dayFormatted}`}**\n${statsSummary}`,
       embeds: brief.aiSummary
         ? [
             {
@@ -196,6 +233,7 @@ export async function deliverExecutiveReport(
 
   const response = await (opts.fetchImpl ?? fetch)(target, {
     method: "POST",
+    redirect: "error",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(6000),

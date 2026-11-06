@@ -129,6 +129,12 @@ Mọi đường `/api/*` đều cần đăng nhập: gửi `Authorization: Beare
       -H "Authorization: Bearer <API_TOKEN>"
     ```
 
+## Bản tin tự động, Telegram và dọn bài cũ
+
+- **Telegram:** dán vào ô Webhook địa chỉ `https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>`. Chuông và bản tin được gửi dạng chữ thường tới nhóm hoặc kênh đó. Địa chỉ này chứa token bot nên được mã hóa trong DB như các khóa khác.
+- **Bản tin tự động:** đặt giờ ở Cài đặt (hoặc `DAILY_REPORT_TIME=08:00` trong `.env`). Hẹn trước 12:00 thì gửi bản tin của hôm qua, từ 12:00 trở đi thì gửi bản tin của hôm nay, kèm tóm tắt AI khi có khóa. Mỗi ngày gửi một lần; máy khởi động lại sau giờ hẹn vẫn gửi bù trong ngày; gửi lỗi thì không thử lại mỗi phút, lỗi hiện ở trang Cài đặt.
+- **Dọn bài cũ:** đặt số ngày giữ bài (hoặc `RETENTION_DAYS=90`); 0 là giữ mãi, tối thiểu 7. Mỗi ngày dọn một lần. Bài đã ghim, có ghi chú hoặc đang xử lý luôn được giữ; nhãn và người gán không tính vì bài nào cũng được gắn tự động.
+
 ## Hỗ trợ Kỹ thuật & Tích hợp
 
 - Kênh hỗ trợ kỹ thuật chính thức: **Zalo OA XOX**: [https://zalo.me/3972600953931944918](https://zalo.me/3972600953931944918).

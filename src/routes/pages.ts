@@ -9,6 +9,7 @@ import { buckets, briefMarkdown, dayStartIso, daysEnding, localDay, spikeReason 
 import { xRouteWarning, briefPage, comparePage, dashboardPage, hashtagsPage, mentionsCsv, searchPage, settingsPage } from "../pages.js";
 import { outboundLabel, todayBrief, readView } from "../http/helpers.js";
 import { getRuntimeConfig } from "../runtime_config.js";
+import { lastReportResult, normalizeReportTime } from "../daily.js";
 import type { AppContext } from "../http/context.js";
 
 /** Các trang HTML: tổng quan, cấu hình, báo cáo, so sánh, xuất CSV, xu hướng, tra cứu. */
@@ -88,7 +89,7 @@ export function registerPagesRoutes(app: Hono, ctx: AppContext): void {
   app.get("/settings", (c) => {
     const activeConfig = getRuntimeConfig(config, store);
     const notice = c.req.query("notice") ?? "";
-    return c.html(settingsPage(activeConfig, notice, { unreadableSecrets: [...store.unreadableSecrets], xRoute: store.getXRoute() }));
+    return c.html(settingsPage(activeConfig, notice, { unreadableSecrets: [...store.unreadableSecrets], xRoute: store.getXRoute(), lastReport: lastReportResult(store) }));
   });
 
   app.post("/settings", async (c) => {
@@ -107,6 +108,13 @@ export function registerPagesRoutes(app: Hono, ctx: AppContext): void {
     store.setSetting("DESKTOP_NOTIFY", body.DESKTOP_NOTIFY === "1" ? "1" : "0");
     if (body.LISTEN_INTERVAL_MINUTES) {
       store.setSetting("LISTEN_INTERVAL_MINUTES", String(body.LISTEN_INTERVAL_MINUTES));
+    }
+    if (body.DAILY_REPORT_TIME !== undefined) {
+      store.setSetting("DAILY_REPORT_TIME", normalizeReportTime(String(body.DAILY_REPORT_TIME ?? "")));
+    }
+    if (body.RETENTION_DAYS !== undefined) {
+      const days = Math.max(0, Math.min(3650, Math.floor(Number(body.RETENTION_DAYS) || 0)));
+      store.setSetting("RETENTION_DAYS", String(days > 0 ? Math.max(7, days) : 0));
     }
     if (body.SEARCH_MAX_RESULTS) {
       store.setSetting("SEARCH_MAX_RESULTS", String(body.SEARCH_MAX_RESULTS));

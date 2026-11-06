@@ -32,6 +32,8 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     SEARCH_MAX_RESULTS: 10,
     ALERT_WEBHOOK_URL: "",
     DESKTOP_NOTIFY: "0",
+    DAILY_REPORT_TIME: "",
+    RETENTION_DAYS: 0,
     LLM_API_KEY: "",
     LLM_BASE_URL: "https://api.openai.com/v1",
     LLM_MODEL: "gpt-4o-mini",

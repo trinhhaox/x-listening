@@ -26,6 +26,8 @@ const defaultConfig: AppConfig = {
   LLM_MODEL: "gpt-4o-mini",
   ALERT_WEBHOOK_URL: "",
   DESKTOP_NOTIFY: "0",
+  DAILY_REPORT_TIME: "",
+  RETENTION_DAYS: 0,
 };
 
 test("extractWordCloud trích xuất từ khóa, lọc stop words và phân cụm chủ đề", () => {

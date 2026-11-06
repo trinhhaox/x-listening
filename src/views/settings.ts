@@ -27,8 +27,18 @@ function savedSecretHint(value: string, name: string, missingText = ""): string 
 export function settingsPage(
   config: AppConfig,
   notice?: string,
-  extra: { unreadableSecrets?: string[]; xRoute?: { route: string; cookieConfigured: boolean; at: string } } = {},
+  extra: {
+    unreadableSecrets?: string[];
+    xRoute?: { route: string; cookieConfigured: boolean; at: string };
+    lastReport?: { at: string; day: string; error: string };
+  } = {},
 ): string {
+  const report = extra.lastReport;
+  const reportStatus = report
+    ? report.error
+      ? `<p class="hint" style="color:var(--heroui-danger);">Lần gửi lúc ${escapeHtml(formatWhen(report.at))} lỗi: ${escapeHtml(report.error)}</p>`
+      : `<p class="hint" style="color:var(--heroui-success);">${uiIcon("check", 12)} Đã gửi bản tin ngày ${escapeHtml(report.day.split("-").reverse().join("/"))} lúc ${escapeHtml(formatWhen(report.at))}.</p>`
+    : "";
   const unreadable = extra.unreadableSecrets ?? [];
   const xWarn = xRouteWarning(extra.xRoute);
   const xOk = extra.xRoute?.route === "direct" ? `<p class="hint" style="color:var(--heroui-success);">${uiIcon("check", 12)} Lượt quét X lúc ${escapeHtml(formatWhen(extra.xRoute.at))} đọc thẳng bằng cookie phiên.</p>` : "";
@@ -144,6 +154,12 @@ export function settingsPage(
             <input class="heroui-input" type="url" name="ALERT_WEBHOOK_URL" value="" autocomplete="off" placeholder="https://discord.com/api/webhooks/... hoặc Webhook URL..." />
             ${savedSecretHint(config.ALERT_WEBHOOK_URL, "ALERT_WEBHOOK_URL")}
           </label>
+          <p class="hint">Telegram: <code>https://api.telegram.org/bot&lt;TOKEN&gt;/sendMessage?chat_id=&lt;CHAT_ID&gt;</code></p>
+          <label class="heroui-label">Gửi bản tin tự động lúc (giờ Việt Nam, để trống là tắt)
+            <input class="heroui-input" type="time" name="DAILY_REPORT_TIME" value="${escapeHtml(config.DAILY_REPORT_TIME)}" />
+          </label>
+          <p class="hint">Hẹn trước 12:00 thì gửi bản tin của hôm qua; từ 12:00 trở đi thì gửi bản tin của hôm nay. Gửi qua webhook ở trên.</p>
+          ${reportStatus}
           <label class="check-label">
             <input type="checkbox" name="DESKTOP_NOTIFY" value="1"${config.DESKTOP_NOTIFY === "1" ? " checked" : ""} />
             Bật thông báo nổi trên màn hình máy tính (Desktop Notification)
@@ -164,6 +180,10 @@ export function settingsPage(
           <label class="heroui-label">Số bài viết tối đa mỗi lần quét (10 – 100)
             <input class="heroui-input" type="number" name="SEARCH_MAX_RESULTS" min="10" max="100" value="${config.SEARCH_MAX_RESULTS}" />
           </label>
+          <label class="heroui-label">Giữ bài trong bao nhiêu ngày (0 là giữ mãi, tối thiểu 7)
+            <input class="heroui-input" type="number" name="RETENTION_DAYS" min="0" max="3650" value="${config.RETENTION_DAYS}" />
+          </label>
+          <p class="hint">Mỗi ngày dọn một lần. Bài đã ghim, có ghi chú hoặc đang xử lý luôn được giữ.</p>
         </div>
       </div>
 

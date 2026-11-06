@@ -20,6 +20,10 @@ const schema = z.object({
   SEARCH_MAX_RESULTS: z.coerce.number().int().min(10).max(100).default(20),
   ALERT_WEBHOOK_URL: z.string().optional().default(""),
   DESKTOP_NOTIFY: z.enum(["0", "1"]).optional().default("1"),
+  // Giờ gửi bản tin tự động (HH:MM giờ Việt Nam); trống là tắt.
+  DAILY_REPORT_TIME: z.string().optional().default(""),
+  // Số ngày giữ bài; 0 là giữ mãi. Tối thiểu 7 ngày khi bật.
+  RETENTION_DAYS: z.coerce.number().int().min(0).max(3650).default(0),
   LLM_API_KEY: z.string().optional().default(""),
   LLM_BASE_URL: z.string().optional().default("https://api.openai.com/v1"),
   LLM_MODEL: z.string().optional().default("gpt-4o-mini"),

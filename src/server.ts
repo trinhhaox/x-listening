@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { createApp, getRuntimeConfig } from "./app.js";
 import { loadConfig } from "./config.js";
 import { Store } from "./db.js";
+import { runDailyJobs, startDailyLoop } from "./daily.js";
 import { hasSomethingToListen, startListenLoop } from "./scheduler.js";
 import { SettingsCipher } from "./secrets.js";
 
@@ -35,6 +36,17 @@ startListenLoop({
       console.error("[listen]", error instanceof Error ? error.message : error);
     }
   },
+});
+
+startDailyLoop(async () => {
+  try {
+    const result = await runDailyJobs(store, getRuntimeConfig(config, store));
+    if (result.reportSent) console.log(`[daily] đã gửi bản tin ngày ${result.reportSent}`);
+    if (result.reportError) console.warn(`[daily] không gửi được bản tin: ${result.reportError}`);
+    if (result.pruned) console.log(`[daily] đã dọn ${result.pruned} bài cũ`);
+  } catch (error: unknown) {
+    console.error("[daily]", error instanceof Error ? error.message : error);
+  }
 });
 
 serve({ fetch: app.fetch, hostname: config.HOST, port: config.PORT }, (info) => {

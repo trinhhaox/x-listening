@@ -883,6 +883,31 @@ export class Store {
     return hits;
   }
 
+  /**
+   * Xóa bài cũ hơn mốc. Giữ lại bài đã ghim, có ghi chú hoặc đang xử lý, vì đó là bài người
+   * vận hành đã đụng tới. Nhãn và người gán không tính: bài nào cũng được gắn tự động. Hồi chuông của bài bị xóa cũng xóa theo.
+   */
+  pruneMentions(beforeIso: string): number {
+    this.db.exec("BEGIN");
+    try {
+      const result = this.db
+        .prepare(
+          `DELETE FROM mentions
+           WHERE created_at < ? AND starred = 0 AND note = '' AND queue != 'reading'`,
+        )
+        .run(beforeIso);
+      this.db.exec(
+        `DELETE FROM alert_hits WHERE NOT EXISTS (
+           SELECT 1 FROM mentions m WHERE m.id = alert_hits.mention_id AND m.topic_id = alert_hits.topic_id)`,
+      );
+      this.db.exec("COMMIT");
+      return Number(result.changes);
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   getSetting(key: string): string | undefined {
     const row = this.db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
     return row ? this.readSetting(key, row.value) : undefined;

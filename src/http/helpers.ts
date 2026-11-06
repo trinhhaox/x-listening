@@ -12,13 +12,17 @@ export function outboundLabel(config: AppConfig): string {
 let cachedAiBrief: { day: string; text: string; expiresAt: number } | null = null;
 
 export async function todayBrief(store: Store, config: AppConfig, fetchImpl?: typeof fetch): Promise<Brief> {
-  const today = localDay(new Date());
-  const posts = store.listHeardSince(dayStartIso(today));
-  const base = buildBrief(today, posts, store.listFirstSeen());
+  return briefForDay(store, config, localDay(new Date()), fetchImpl);
+}
+
+/** Bản tin của một ngày (giờ Việt Nam), kèm tóm tắt AI khi có khóa. */
+export async function briefForDay(store: Store, config: AppConfig, day: string, fetchImpl?: typeof fetch): Promise<Brief> {
+  const posts = store.listHeardSince(dayStartIso(day)).filter((post) => localDay(new Date(post.createdAt)) === day);
+  const base = buildBrief(day, posts, store.listFirstSeen());
 
   if (config.LLM_API_KEY.trim()) {
     const now = Date.now();
-    if (cachedAiBrief && cachedAiBrief.day === today && cachedAiBrief.expiresAt > now) {
+    if (cachedAiBrief && cachedAiBrief.day === day && cachedAiBrief.expiresAt > now) {
       base.aiSummary = cachedAiBrief.text;
     } else {
       const summary = await generateAiBrief(posts, {
@@ -27,7 +31,7 @@ export async function todayBrief(store: Store, config: AppConfig, fetchImpl?: ty
         model: config.LLM_MODEL,
         fetchImpl,
       });
-      cachedAiBrief = { day: today, text: summary, expiresAt: now + 10 * 60 * 1000 };
+      cachedAiBrief = { day, text: summary, expiresAt: now + 10 * 60 * 1000 };
       base.aiSummary = summary;
     }
   }

@@ -25,6 +25,8 @@ const config: AppConfig = {
   LLM_MODEL: "gpt-4o-mini",
   ALERT_WEBHOOK_URL: "",
   DESKTOP_NOTIFY: "0",
+  DAILY_REPORT_TIME: "",
+  RETENTION_DAYS: 0,
 };
 
 test("extractHashtags trích xuất chính xác các hashtag tiếng Việt và tiếng Anh", () => {
