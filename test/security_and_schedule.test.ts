@@ -161,3 +161,31 @@ test("lịch nghe đọc lại chu kỳ mỗi lượt", async () => {
   assert.equal(delays.at(-1), 5 * 60_000);
   loop.stop();
 });
+
+test("sau Caddy + Cloudflare: giới hạn đăng nhập theo X-Client-IP, không gộp chung IP Cloudflare", async () => {
+  const store = Store.open(":memory:");
+  const { app } = createApp(testConfig(), store);
+  // Caddy chạy trên máy chủ, gọi vào app qua cầu Docker.
+  const env = { incoming: { socket: { remoteAddress: "172.17.0.1", remotePort: 5000, remoteFamily: "IPv4" } } };
+  const attempt = (clientIp: string) =>
+    app.request(
+      "/login",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "x-forwarded-for": "162.158.1.1",
+          "x-client-ip": clientIp,
+        },
+        body: "password=sai-mat-khau-1",
+      },
+      env,
+    );
+  // 9 người khác nhau, cùng đi qua một IP Cloudflare: không ai bị chặn oan.
+  for (let i = 0; i < 9; i++) assert.equal((await attempt(`198.18.0.${i}`)).status, 401);
+  // Một người thử sai 9 lần thì bị chặn.
+  let last = 0;
+  for (let i = 0; i < 9; i++) last = (await attempt("198.18.1.50")).status;
+  assert.equal(last, 429);
+  store.close();
+});

@@ -37,8 +37,11 @@ export function clientIp(c: Context): string {
   } catch {
     remote = "";
   }
-  const forwarded = c.req.header("x-forwarded-for")?.split(",")[0]?.trim();
-  if (forwarded && (!remote || isLoopbackOrPrivate(remote))) return forwarded;
+  if (!remote || isLoopbackOrPrivate(remote)) {
+    // Caddy đặt X-Client-IP (IP thật, kể cả khi đi qua Cloudflare); x-forwarded-for chỉ là dự phòng.
+    const proxied = c.req.header("x-client-ip")?.trim() || c.req.header("x-forwarded-for")?.split(",")[0]?.trim();
+    if (proxied) return proxied;
+  }
   return remote || "local";
 }
 
