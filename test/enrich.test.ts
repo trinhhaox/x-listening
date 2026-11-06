@@ -39,6 +39,8 @@ test("đọc kết quả AI: bỏ phần tử hỏng, số thứ tự lạ hoặ
   const out = parseSentimentBatch('Đây: [{"n":1,"s":"NEGATIVE","r":"chê"},{"n":1,"s":"positive"},{"n":9,"s":"neutral"},{"n":2,"s":"hmm"}]', items);
   assert.deepEqual(out, [{ id: "a", topicId: "t", sentiment: "negative", reason: "chê" }]);
   assert.deepEqual(parseSentimentBatch("không có json", items), []);
+  // Bị cắt giữa chừng vẫn giữ phần tử đã đủ.
+  assert.deepEqual(parseSentimentBatch('[{"n":2,"s":"positive","r":"khen"},\n{"n":1,"s":"neg', items).map((v) => v.id), ["b"]);
 });
 
 test("AI chấm lại cảm xúc, bật chuông khi bài thành tiêu cực và gỡ chuông báo nhầm", async () => {

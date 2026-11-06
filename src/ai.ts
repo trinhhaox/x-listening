@@ -372,7 +372,8 @@ Mỗi bài có [chủ đề] là thương hiệu hoặc vấn đề đang theo d
 - neutral: hỏi thông tin, tin tức thuần túy, quảng cáo hoặc bài do chính thương hiệu đăng, không rõ thái độ.
 Chú ý câu mỉa mai ("ngon quá cơ, đợi 2 tiếng"), phủ định ("không tệ"), tiếng lóng và viết tắt.
 Trả về DUY NHẤT một mảng JSON, mỗi bài một phần tử, theo đúng số thứ tự:
-[{"n":1,"s":"negative","r":"lý do ngắn dưới 12 từ"}]`;
+[{"n":1,"s":"negative","r":"lý do ngắn dưới 10 từ"}]
+Không viết gì ngoài mảng JSON.`;
 
 export function buildSentimentBatchPrompt(items: SentimentBatchItem[]): string {
   return items
@@ -380,23 +381,20 @@ export function buildSentimentBatchPrompt(items: SentimentBatchItem[]): string {
     .join("\n");
 }
 
-/** Đọc mảng JSON từ câu trả lời (có thể bọc trong ```json). Phần tử hỏng thì bỏ qua. */
+/**
+ * Đọc kết quả từ câu trả lời (có thể bọc trong ```json, hoặc bị cắt giữa chừng).
+ * Đọc từng đối tượng {...} riêng lẻ, nên phần tử hỏng hay bị cắt chỉ mất phần tử đó.
+ */
 export function parseSentimentBatch(raw: string, items: SentimentBatchItem[]): SentimentVerdict[] {
-  const start = raw.indexOf("[");
-  const end = raw.lastIndexOf("]");
-  if (start < 0 || end <= start) return [];
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw.slice(start, end + 1));
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(parsed)) return [];
   const out: SentimentVerdict[] = [];
   const seen = new Set<number>();
-  for (const entry of parsed) {
-    if (!entry || typeof entry !== "object") continue;
-    const e = entry as { n?: unknown; s?: unknown; r?: unknown };
+  for (const match of raw.matchAll(/\{[^{}]*\}/g)) {
+    let e: { n?: unknown; s?: unknown; r?: unknown };
+    try {
+      e = JSON.parse(match[0]) as typeof e;
+    } catch {
+      continue;
+    }
     const n = Number(e.n);
     const item = Number.isInteger(n) ? items[n - 1] : undefined;
     if (!item || seen.has(n)) continue;
@@ -419,7 +417,7 @@ export async function classifySentimentBatch(items: SentimentBatchItem[], option
     ],
     options,
     false,
-    { maxTokens: 60 + items.length * 40, timeoutMs: 60_000 },
+    { maxTokens: 400 + items.length * 90, timeoutMs: 90_000 },
   );
   return parseSentimentBatch(raw, items);
 }
