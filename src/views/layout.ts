@@ -55,7 +55,7 @@ function renderNavbar(activeTab: string): string {
           <button class="btn btn-sm btn-primary" type="submit" title="Quét tin tức mới ngay trên tất cả các kênh">${uiIcon("refresh")} Quét tin</button>
         </form>
         <form method="post" action="/logout" style="display:inline-block; margin:0;">
-          <button class="btn btn-sm btn-outline" type="submit" title="Đăng xuất khỏi hệ thống">${uiIcon("logout")} Đăng xuất</button>
+          <button class="btn btn-sm btn-outline" type="submit" title="Đăng xuất khỏi hệ thống" aria-label="Đăng xuất">${uiIcon("logout")}<span class="btn-label"> Đăng xuất</span></button>
         </form>
       </div>
     </div>

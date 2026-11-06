@@ -260,8 +260,14 @@ export function dashboardPage(model: DashboardModel): string {
 
     ${model.notice ? `<div class="deck-alert info">${uiIcon("info")} ${escapeHtml(model.notice)}</div>` : ""}
     ${model.spike ? `<div class="deck-alert warning">${uiIcon("zap")} <strong>Đột biến phát hiện:</strong> ${escapeHtml(model.spike)}</div>` : ""}
-    ${model.xNotice ? `<div class="deck-alert warning">${uiIcon("alert")} ${model.xNotice}</div>` : ""}
-    ${model.hasFacebook ? "" : `<div class="deck-alert warning">${uiIcon("alert")} Chưa có cấu hình Facebook Cookie. Vào mục <a href="/settings">Cấu hình kết nối</a> để thêm.</div>`}
+    ${(() => {
+      const items = [
+        model.xNotice,
+        model.hasFacebook ? "" : 'Chưa có cấu hình Facebook Cookie. Vào mục <a href="/settings">Cấu hình kết nối</a> để thêm.',
+      ].filter(Boolean);
+      if (!items.length) return "";
+      return `<div class="deck-alert warning">${uiIcon("alert")}<div class="alert-lines">${items.map((item) => `<span>${item}</span>`).join("")}</div></div>`;
+    })()}
 
     <!-- KHU VỰC 1: RADAR TÌNH BÁO & CẢNH BÁO KHỦNG HOẢNG (NỬA TRÊN) -->
     <section class="executive-radar">
@@ -397,7 +403,6 @@ export function dashboardPage(model: DashboardModel): string {
           }
         </div>
         <div class="ribbon-export">
-          <button class="btn btn-sm btn-outline" type="button" onclick="const p=document.getElementById('deck-admin-panel'); if(p){ p.open=!p.open; if(p.open) p.scrollIntoView({behavior:'smooth'}); }" title="Mở bảng cấu hình Nguồn theo dõi, Cảnh báo, Từ điển">${uiIcon("settings")} Nguồn theo dõi (${model.topics.length})</button>
           <button class="btn btn-sm btn-primary" type="submit" form="auto-classify-form" title="Tự động phân loại nhãn và gán người xử lý cho các bài viết chưa gán">${uiIcon("zap")} Tự động phân loại bằng AI</button>
           <a class="btn btn-sm btn-outline" href="/export.csv?${(() => {
             const p = new URLSearchParams();
@@ -776,6 +781,10 @@ function renderMentionCard(
         <form method="post" action="/mutes">${backFields}<input type="hidden" name="username" value="${escapeHtml(username)}" /><button class="btn-icon" title="Bỏ qua tài khoản này" type="submit">${uiIcon("mute", 14)}</button></form>
       </div>
 
+    </div>
+
+    <details class="card-more">
+      <summary>${uiIcon("tag", 12)} Phân loại, gán người & ghi chú</summary>
       <div class="inline-forms">
         <form class="inline-form" method="post" action="${action}/auto-classify">${backFields}
           <button class="btn btn-xs btn-outline btn-ai-tag" type="submit" title="AI tự động phân loại nhãn và gán người xử lý cho riêng bài này">${uiIcon("zap", 12)} AI Gán</button>
@@ -800,12 +809,10 @@ function renderMentionCard(
           <button class="btn btn-xs btn-outline" type="submit">Gán</button>
         </form>
       </div>
-    </div>
-
-    <!-- Form ghi chú nội bộ -->
-    <form class="card-note-form" method="post" action="${action}/note">${backFields}
-      <input class="heroui-input heroui-input-sm" name="note" maxlength="280" value="${escapeHtml(mention.note)}" placeholder="Nhập ghi chú nội bộ cho ca xử lý này..." />
-      <button class="btn btn-xs btn-outline" type="submit">Lưu ghi chú</button>
-    </form>
+      <form class="card-note-form" method="post" action="${action}/note">${backFields}
+        <input class="heroui-input heroui-input-sm" name="note" maxlength="280" value="${escapeHtml(mention.note)}" placeholder="Nhập ghi chú nội bộ cho ca xử lý này..." />
+        <button class="btn btn-xs btn-outline" type="submit">Lưu ghi chú</button>
+      </form>
+    </details>
   </article>`;
 }

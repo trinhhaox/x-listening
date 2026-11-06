@@ -89,7 +89,9 @@ export function briefPage(brief: Brief, notice?: string): string {
         <h2>Tóm tắt Tình hình & Đánh giá Rủi ro Truyền thông</h2>
       </div>
       <div class="ai-brief-content">
-        <p>${escapeHtml(brief.aiSummary ?? "").replaceAll("\n", "<br />")}</p>
+        ${brief.aiSummary
+          ? `<p>${escapeHtml(brief.aiSummary).replaceAll("\n", "<br />")}</p>`
+          : `<p class="text-muted">Chưa có tóm tắt AI. Thêm khóa mô hình AI ở <a class="heroui-link" href="/settings">Cấu hình kết nối</a> để bản tin có phần nhận định tự động.</p>`}
       </div>
     </section>
 

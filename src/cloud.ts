@@ -100,6 +100,7 @@ export function extractWordCloud(
     { count: number; posCount: number; negCount: number; neuCount: number }
   >();
 
+  const bigramStats = new Map<string, { count: number; posCount: number; negCount: number; neuCount: number }>();
   const clusterCounts = new Map<string, { count: number; posCount: number; negCount: number; neuCount: number }>();
   for (const c of CLUSTERS_DEF) {
     clusterCounts.set(c.id, { count: 0, posCount: 0, negCount: 0, neuCount: 0 });
@@ -131,22 +132,28 @@ export function extractWordCloud(
       wordStats.set(t, entry);
     }
 
-    // Phân tích cụm 2 từ (Bigrams) có nghĩa
+    // Cụm 2 từ: chỉ ghép trong cùng một vế câu (không vượt dấu câu) và bỏ qua stop word.
     const seenBigrams = new Set<string>();
-    for (let i = 0; i < tokens.length - 1; i++) {
-      const w1 = tokens[i];
-      const w2 = tokens[i + 1];
-      if (STOP_WORDS.has(w1) || STOP_WORDS.has(w2)) continue;
-      const bigram = `${w1} ${w2}`;
-      if (seenBigrams.has(bigram)) continue;
-      seenBigrams.add(bigram);
-
-      const entry = wordStats.get(bigram) ?? { count: 0, posCount: 0, negCount: 0, neuCount: 0 };
-      entry.count += 1.5; // ưu tiên cụm 2 từ có ngữ nghĩa rõ hơn
-      if (isPos) entry.posCount++;
-      else if (isNeg) entry.negCount++;
-      else entry.neuCount++;
-      wordStats.set(bigram, entry);
+    for (const phrase of rawText.split(/[,.;:!?()\[\]{}"\n|]+/u)) {
+      const words = phrase
+        .split(/\s+/u)
+        .map(cleanToken)
+        .filter((t) => t.length >= 1);
+      for (let i = 0; i < words.length - 1; i++) {
+        const w1 = words[i]!;
+        const w2 = words[i + 1]!;
+        if (w1.length < 2 && w2.length < 2) continue;
+        if (STOP_WORDS.has(w1) || STOP_WORDS.has(w2) || /^\d+$/.test(w1) || /^\d+$/.test(w2)) continue;
+        const bigram = `${w1} ${w2}`;
+        if (seenBigrams.has(bigram)) continue;
+        seenBigrams.add(bigram);
+        const entry = bigramStats.get(bigram) ?? { count: 0, posCount: 0, negCount: 0, neuCount: 0 };
+        entry.count++;
+        if (isPos) entry.posCount++;
+        else if (isNeg) entry.negCount++;
+        else entry.neuCount++;
+        bigramStats.set(bigram, entry);
+      }
     }
 
     // Gán vào Cluster
@@ -163,12 +170,26 @@ export function extractWordCloud(
     }
   }
 
+  // Cụm 2 từ chỉ có nghĩa khi lặp lại ở ít nhất 2 bài; khi đó từ đơn nằm trong cụm
+  // và không xuất hiện nhiều hơn cụm thì bị gộp vào cụm để đám mây không lặp ý.
+  const keptBigrams = Array.from(bigramStats.entries()).filter(([, stats]) => stats.count >= 2);
+  for (const [bigram, stats] of keptBigrams) {
+    for (const part of bigram.split(" ")) {
+      const single = wordStats.get(part);
+      if (single && single.count <= stats.count) wordStats.delete(part);
+    }
+  }
+  const ranked = [
+    ...Array.from(wordStats.entries()).map(([text, stats]) => ({ text, stats, score: stats.count })),
+    ...keptBigrams.map(([text, stats]) => ({ text, stats, score: stats.count * 1.5 })), // ưu tiên cụm có nghĩa rõ hơn
+  ];
+
   // Chuyển đổi và sắp xếp
-  const words: WordCloudItem[] = Array.from(wordStats.entries())
-    .filter(([_, stats]) => stats.count >= 1)
-    .sort((a, b) => b[1].count - a[1].count)
+  const words: WordCloudItem[] = ranked
+    .filter(({ stats }) => stats.count >= 1)
+    .sort((a, b) => b.score - a.score || b.stats.count - a.stats.count)
     .slice(0, limit)
-    .map(([text, stats]) => {
+    .map(({ text, stats }) => {
       let sentiment: "positive" | "negative" | "neutral" = "neutral";
       if (stats.posCount > stats.negCount && stats.posCount > 0) {
         sentiment = "positive";
