@@ -112,7 +112,7 @@ test("Route GET /api/hashtags trả về JSON phân tích hashtag", async () => 
   );
 
   const { app } = createApp(config, store);
-  const res = await app.request("/api/hashtags?days=7");
+  const res = await app.request("/api/hashtags?days=7", { headers: { authorization: `Bearer ${config.ADMIN_PASSWORD}` } });
   assert.equal(res.status, 200);
 
   const json = (await res.json()) as { ok: boolean; data: { totalHashtagsCount: number; list: Array<{ tag: string }> } };

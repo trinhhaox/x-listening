@@ -1357,7 +1357,10 @@ test("quản lý cài đặt runtime settings trong database và override config
   assert.equal(getRes.status, 200);
   const html = await getRes.text();
   assert.match(html, /Cài đặt Bàn nghe/);
-  assert.match(html, /new_cookie_123/);
+  // Khóa bí mật không được in lại ra HTML, chỉ báo là đã lưu.
+  assert.doesNotMatch(html, /new_cookie_123/);
+  assert.doesNotMatch(html, /mywebhook/);
+  assert.match(html, /Đã lưu \(14 ký tự\)/);
 
   // POST /settings
   const postRes = await app.request("/settings", {

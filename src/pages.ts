@@ -1393,7 +1393,40 @@ export function searchPage(model: SearchPageModel): string {
   );
 }
 
-export function settingsPage(config: AppConfig, notice?: string): string {
+/**
+ * Cảnh báo khi lượt quét X gần nhất không đọc được thẳng bằng cookie mà phải lấy qua Bing/DuckDuckGo.
+ * Trả về HTML an toàn (đã escape) hoặc chuỗi rỗng.
+ */
+export function xRouteWarning(route: { route: string; cookieConfigured: boolean; at: string } | undefined): string {
+  if (!route || !route.cookieConfigured || route.route === "direct") return "";
+  const when = escapeHtml(formatWhen(route.at));
+  const what =
+    route.route === "web-index"
+      ? "X không trả bài qua cookie phiên nên đang lấy tạm qua chỉ mục Bing/DuckDuckGo (ít bài và chậm hơn)"
+      : "X không trả bài qua cookie phiên và chỉ mục web cũng không có kết quả";
+  return `Lượt quét X lúc ${when}: ${what}. Thường do cookie auth_token/ct0 đã hết hạn, IP máy chủ bị X chặn, hoặc X đổi mã truy vấn. Thử lấy cookie mới trong <a href="/settings">Cài đặt</a>.`;
+}
+
+/** Khóa bí mật không bao giờ được in lại ra HTML; chỉ báo đã lưu và cho phép xóa. */
+function savedSecretHint(value: string, name: string, missingText = ""): string {
+  if (value.trim()) {
+    return `<span style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:4px; font-size:0.78rem;">
+              <span style="color:var(--heroui-success); font-weight:600;">${uiIcon("check", 12)} Đã lưu (${value.trim().length} ký tự) · để trống để giữ nguyên</span>
+              <span class="check-label" style="font-size:0.78rem;"><input type="checkbox" name="clear_${escapeHtml(name)}" value="1" aria-label="Xóa giá trị đã lưu" /> Xóa giá trị đã lưu</span>
+            </span>`;
+  }
+  if (!missingText) return "";
+  return `<span style="display:block; margin-top:4px; color:var(--heroui-danger); font-size:0.78rem;">${uiIcon("alert", 12)} ${escapeHtml(missingText)}</span>`;
+}
+
+export function settingsPage(
+  config: AppConfig,
+  notice?: string,
+  extra: { unreadableSecrets?: string[]; xRoute?: { route: string; cookieConfigured: boolean; at: string } } = {},
+): string {
+  const unreadable = extra.unreadableSecrets ?? [];
+  const xWarn = xRouteWarning(extra.xRoute);
+  const xOk = extra.xRoute?.route === "direct" ? `<p class="hint" style="color:var(--heroui-success);">${uiIcon("check", 12)} Lượt quét X lúc ${escapeHtml(formatWhen(extra.xRoute.at))} đọc thẳng bằng cookie phiên.</p>` : "";
   return layout(
     "Cài đặt Bàn nghe & Cấu hình",
     `
@@ -1411,6 +1444,7 @@ export function settingsPage(config: AppConfig, notice?: string): string {
     </div>
 
     ${notice ? `<div class="deck-alert info">${uiIcon("info")} ${escapeHtml(notice)}</div>` : ""}
+    ${unreadable.length ? `<div class="deck-alert error">${uiIcon("alert")} Không giải mã được: ${unreadable.map((k) => `<code>${escapeHtml(k)}</code>`).join(", ")}. Có thể SECRETS_KEY hoặc ADMIN_PASSWORD đã đổi; hãy nhập lại các giá trị này.</div>` : ""}
 
     <form class="settings-form" method="post" action="/settings">
       <div class="settings-grid">
@@ -1422,16 +1456,18 @@ export function settingsPage(config: AppConfig, notice?: string): string {
               <p class="hint">Khuyến nghị dùng Cookie để không phát sinh chi phí gói API $100/tháng.</p>
             </div>
           </div>
+          ${xWarn ? `<div class="deck-alert warning">${uiIcon("alert")} ${xWarn}</div>` : xOk}
           <label class="heroui-label">Cookie auth_token
-            <input class="heroui-input" type="password" name="TWITTER_AUTH_TOKEN" value="${escapeHtml(config.TWITTER_AUTH_TOKEN)}" placeholder="F12 -> Cookies -> auth_token" />
-            ${config.TWITTER_AUTH_TOKEN.trim() ? `<span style="display:block; margin-top:4px; color:var(--heroui-success); font-size:0.78rem; font-weight:600;">${uiIcon("check", 12)} Đã lưu (${config.TWITTER_AUTH_TOKEN.trim().length} ký tự)</span>` : `<span style="display:block; margin-top:4px; color:var(--heroui-danger); font-size:0.78rem;">${uiIcon("alert", 12)} Chưa có - Lấy từ F12 -> Cookies -> auth_token</span>`}
+            <input class="heroui-input" type="password" name="TWITTER_AUTH_TOKEN" value="" autocomplete="off" placeholder="F12 -> Cookies -> auth_token" />
+            ${savedSecretHint(config.TWITTER_AUTH_TOKEN, "TWITTER_AUTH_TOKEN", "Chưa có - Lấy từ F12 -> Cookies -> auth_token")}
           </label>
           <label class="heroui-label">Cookie ct0 (CSRF token)
-            <input class="heroui-input" type="password" name="TWITTER_CT0" value="${escapeHtml(config.TWITTER_CT0)}" placeholder="F12 -> Cookies -> ct0" />
-            ${config.TWITTER_CT0.trim() ? `<span style="display:block; margin-top:4px; color:var(--heroui-success); font-size:0.78rem; font-weight:600;">${uiIcon("check", 12)} Đã lưu (${config.TWITTER_CT0.trim().length} ký tự)</span>` : `<span style="display:block; margin-top:4px; color:var(--heroui-danger); font-size:0.78rem; font-weight:600;">${uiIcon("alert", 12)} Chưa có - Bắt buộc cần ct0 để quét bài trên X</span>`}
+            <input class="heroui-input" type="password" name="TWITTER_CT0" value="" autocomplete="off" placeholder="F12 -> Cookies -> ct0" />
+            ${savedSecretHint(config.TWITTER_CT0, "TWITTER_CT0", "Chưa có - Bắt buộc cần ct0 để quét bài trên X")}
           </label>
           <label class="heroui-label">Hoặc Bearer Token X API v2 (Nếu có)
-            <input class="heroui-input" type="password" name="X_BEARER_TOKEN" value="${escapeHtml(config.X_BEARER_TOKEN)}" placeholder="Bearer token chính thức..." />
+            <input class="heroui-input" type="password" name="X_BEARER_TOKEN" value="" autocomplete="off" placeholder="Bearer token chính thức..." />
+            ${savedSecretHint(config.X_BEARER_TOKEN, "X_BEARER_TOKEN")}
           </label>
         </div>
 
@@ -1444,11 +1480,12 @@ export function settingsPage(config: AppConfig, notice?: string): string {
             </div>
           </div>
           <label class="heroui-label">Cookie Facebook (c_user & xs)
-            <textarea class="heroui-textarea" name="FACEBOOK_COOKIE" rows="3" placeholder="c_user=...; xs=...;">${escapeHtml(config.FACEBOOK_COOKIE)}</textarea>
-            ${config.FACEBOOK_COOKIE.trim() ? `<span style="display:block; margin-top:4px; color:var(--heroui-success); font-size:0.78rem; font-weight:600;">${uiIcon("check", 12)} Đã lưu (${config.FACEBOOK_COOKIE.trim().length} ký tự)</span>` : `<span style="display:block; margin-top:4px; color:var(--heroui-danger); font-size:0.78rem;">Chưa cấu hình</span>`}
+            <textarea class="heroui-textarea" name="FACEBOOK_COOKIE" rows="3" placeholder="c_user=...; xs=...;"></textarea>
+            ${savedSecretHint(config.FACEBOOK_COOKIE, "FACEBOOK_COOKIE", "Chưa cấu hình")}
           </label>
           <label class="heroui-label">Hoặc Page Access Token (Nếu có)
-            <input class="heroui-input" type="password" name="FACEBOOK_ACCESS_TOKEN" value="${escapeHtml(config.FACEBOOK_ACCESS_TOKEN)}" placeholder="Token Graph API..." />
+            <input class="heroui-input" type="password" name="FACEBOOK_ACCESS_TOKEN" value="" autocomplete="off" placeholder="Token Graph API..." />
+            ${savedSecretHint(config.FACEBOOK_ACCESS_TOKEN, "FACEBOOK_ACCESS_TOKEN")}
           </label>
         </div>
 
@@ -1461,10 +1498,12 @@ export function settingsPage(config: AppConfig, notice?: string): string {
             </div>
           </div>
           <label class="heroui-label">Threads User Access Token
-            <input class="heroui-input" type="password" name="THREADS_ACCESS_TOKEN" value="${escapeHtml(config.THREADS_ACCESS_TOKEN)}" placeholder="Threads Graph API Token..." />
+            <input class="heroui-input" type="password" name="THREADS_ACCESS_TOKEN" value="" autocomplete="off" placeholder="Threads Graph API Token..." />
+            ${savedSecretHint(config.THREADS_ACCESS_TOKEN, "THREADS_ACCESS_TOKEN")}
           </label>
           <label class="heroui-label">YouTube Data API v3 Key
-            <input class="heroui-input" type="password" name="YOUTUBE_API_KEY" value="${escapeHtml(config.YOUTUBE_API_KEY)}" placeholder="AIzaSy..." />
+            <input class="heroui-input" type="password" name="YOUTUBE_API_KEY" value="" autocomplete="off" placeholder="AIzaSy..." />
+            ${savedSecretHint(config.YOUTUBE_API_KEY, "YOUTUBE_API_KEY")}
           </label>
         </div>
 
@@ -1477,7 +1516,8 @@ export function settingsPage(config: AppConfig, notice?: string): string {
             </div>
           </div>
           <label class="heroui-label">LLM API Key
-            <input class="heroui-input" type="password" name="LLM_API_KEY" value="${escapeHtml(config.LLM_API_KEY)}" placeholder="sk-... hoặc ant-api-..." />
+            <input class="heroui-input" type="password" name="LLM_API_KEY" value="" autocomplete="off" placeholder="sk-... hoặc ant-api-..." />
+            ${savedSecretHint(config.LLM_API_KEY, "LLM_API_KEY")}
           </label>
           <label class="heroui-label">Base URL
             <input class="heroui-input" type="text" name="LLM_BASE_URL" value="${escapeHtml(config.LLM_BASE_URL)}" placeholder="https://api.openai.com/v1 hoặc https://api.anthropic.com" />
@@ -1496,7 +1536,8 @@ export function settingsPage(config: AppConfig, notice?: string): string {
             </div>
           </div>
           <label class="heroui-label">Webhook URL (Discord, Slack, Telegram Bot)
-            <input class="heroui-input" type="url" name="ALERT_WEBHOOK_URL" value="${escapeHtml(config.ALERT_WEBHOOK_URL)}" placeholder="https://discord.com/api/webhooks/... hoặc Webhook URL..." />
+            <input class="heroui-input" type="url" name="ALERT_WEBHOOK_URL" value="" autocomplete="off" placeholder="https://discord.com/api/webhooks/... hoặc Webhook URL..." />
+            ${savedSecretHint(config.ALERT_WEBHOOK_URL, "ALERT_WEBHOOK_URL")}
           </label>
           <label class="check-label">
             <input type="checkbox" name="DESKTOP_NOTIFY" value="1"${config.DESKTOP_NOTIFY === "1" ? " checked" : ""} />

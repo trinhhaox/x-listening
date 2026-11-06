@@ -9,6 +9,7 @@ export type { AlertRule };
 import type { HitNotice } from "./notify.js";
 import { classifySentiment, type Sentiment } from "./sentiment.js";
 import { classifyMentionRuleBased } from "./ai.js";
+import { isEncrypted, isSecretSetting, type SettingsCipher } from "./secrets.js";
 
 export type Topic = {
   id: string;
@@ -118,7 +119,31 @@ export type NewMention = {
 };
 
 export class Store {
+  private cipher: SettingsCipher | undefined;
+  /** Các khóa bí mật có trong DB nhưng không giải mã được (khóa mã hóa đã đổi). */
+  readonly unreadableSecrets = new Set<string>();
+
   constructor(private readonly db: DatabaseSync) {}
+
+  /**
+   * Bật mã hóa cho các cài đặt bí mật. Giá trị cũ còn ở dạng chữ thường được mã hóa lại ngay.
+   */
+  useSettingsCipher(cipher: SettingsCipher): void {
+    this.cipher = cipher;
+    const rows = this.db.prepare("SELECT key, value FROM settings").all() as { key: string; value: string }[];
+    for (const row of rows) {
+      if (!isSecretSetting(row.key)) continue;
+      if (row.value && !isEncrypted(row.value)) this.setSetting(row.key, row.value);
+      else if (row.value && cipher.decrypt(row.value) === undefined) this.unreadableSecrets.add(row.key);
+    }
+  }
+
+  private readSetting(key: string, stored: string): string | undefined {
+    if (!isSecretSetting(key) || !isEncrypted(stored)) return stored;
+    const plain = this.cipher?.decrypt(stored);
+    if (plain === undefined) this.unreadableSecrets.add(key);
+    return plain;
+  }
 
   static open(path: string): Store {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
@@ -209,6 +234,7 @@ export class Store {
     ensureColumn(db, "alert_hits", "notified", "notified INTEGER NOT NULL DEFAULT 1");
     ensureColumn(db, "alerts", "threshold_count", "threshold_count INTEGER NOT NULL DEFAULT 3");
     ensureColumn(db, "alerts", "time_window_minutes", "time_window_minutes INTEGER NOT NULL DEFAULT 60");
+    db.exec("CREATE INDEX IF NOT EXISTS mentions_topic_url ON mentions(topic_id, url)");
     return new Store(db);
   }
 
@@ -265,6 +291,14 @@ export class Store {
 
   insertMention(mention: NewMention, fetchedAt: string): boolean {
     if (this.isMuted(mention.authorUsername)) return false;
+    // Cùng một đường link trong cùng tần số là cùng một bài, kể cả khi mã bài đổi cách tính
+    // (ví dụ bài báo lưu bằng mã băm cũ). Tránh lưu trùng.
+    if (mention.url) {
+      const sameLink = this.db
+        .prepare("SELECT 1 AS ok FROM mentions WHERE topic_id = ? AND url = ? AND id <> ? LIMIT 1")
+        .get(mention.topicId, mention.url, mention.id);
+      if (sameLink) return false;
+    }
     const feeling = classifySentiment(mention.text, this.lexiconBundle());
     const existed = Boolean(
       this.db.prepare("SELECT 1 AS ok FROM mentions WHERE id = ? AND topic_id = ?").get(mention.id, mention.topicId),
@@ -930,10 +964,14 @@ export class Store {
 
   getSetting(key: string): string | undefined {
     const row = this.db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
-    return row?.value;
+    return row ? this.readSetting(key, row.value) : undefined;
   }
 
   setSetting(key: string, value: string): void {
+    if (isSecretSetting(key)) {
+      this.unreadableSecrets.delete(key);
+      if (value && this.cipher) value = this.cipher.encrypt(value);
+    }
     this.db
       .prepare(
         `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
@@ -942,11 +980,29 @@ export class Store {
       .run(key, value, new Date().toISOString());
   }
 
+  /** Đường lấy tin X lần gần nhất (xem XRoute trong xcookie.ts). */
+  setXRoute(route: string, cookieConfigured: boolean, at = new Date().toISOString()): void {
+    this.setSetting("X_LAST_ROUTE", JSON.stringify({ route, cookieConfigured, at }));
+  }
+
+  getXRoute(): { route: string; cookieConfigured: boolean; at: string } | undefined {
+    const raw = this.getSetting("X_LAST_ROUTE");
+    if (!raw) return undefined;
+    try {
+      const parsed = JSON.parse(raw) as { route?: unknown; cookieConfigured?: unknown; at?: unknown };
+      if (typeof parsed.route !== "string" || typeof parsed.at !== "string") return undefined;
+      return { route: parsed.route, cookieConfigured: parsed.cookieConfigured === true, at: parsed.at };
+    } catch {
+      return undefined;
+    }
+  }
+
   getAllSettings(): Record<string, string> {
     const rows = this.db.prepare("SELECT key, value FROM settings").all() as { key: string; value: string }[];
     const result: Record<string, string> = {};
     for (const row of rows) {
-      result[row.key] = row.value;
+      const value = this.readSetting(row.key, row.value);
+      if (value !== undefined) result[row.key] = value;
     }
     return result;
   }

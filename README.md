@@ -12,10 +12,14 @@ npm install
 npm run dev            # http://127.0.0.1:3021
 ```
 
+Chạy bằng Docker: `docker compose up -d --build`, ứng dụng mở ở cổng **3028** trên máy chủ (bên trong container vẫn là 3021). Dữ liệu nằm trong volume `listening-data`.
+
+> **Lưu ý rủi ro:** cách đọc bằng cookie phiên (X, Facebook) không phải API chính thức và trái điều khoản của các nền tảng. Tài khoản dùng cookie có thể bị khóa; nên dùng tài khoản phụ.
+
 Chưa có token vẫn vào được bàn nghe. Nút **Nạp tin mẫu** tạo vài bài giả có dấu **Mẫu** để xem bố cục. Muốn nghe nền tảng nào, điền cấu hình tương ứng trong file `.env`:
 - **Không cần đăng ký App/Developer (Phương pháp Session Cookie):**
   - `TWITTER_AUTH_TOKEN` & `TWITTER_CT0`: Cookie trình duyệt sau khi đăng nhập `x.com`. Miễn phí 100%, không cần gói $100/tháng của X API v2.
-  - `FACEBOOK_COOKIE`: Chuỗi cookie trình duyệt (chứa `c_user` và `xs`) để đọc bài viết từ các Fanpage công khai qua `mbasic.facebook.com` mà không cần App Review.
+  - `FACEBOOK_COOKIE`: Chuỗi cookie trình duyệt (chứa `c_user` và `xs`) để đọc bài viết từ các Fanpage công khai qua trang `www.facebook.com` (dự phòng bằng `mbasic.facebook.com`) mà không cần App Review.
 - **Hoặc dùng API chính thức (nếu có tài khoản Developer):**
   - `X_BEARER_TOKEN`: quyền đọc recent search trên X.
   - `FACEBOOK_ACCESS_TOKEN`: token đọc được Trang Facebook.
@@ -76,7 +80,7 @@ Cho phép các hệ thống crawler bên ngoài (TikTok, YouTube, RSS tin báo..
 
 ```bash
 curl -X POST http://127.0.0.1:3021/api/mentions \
-  -H "Authorization: Bearer <ADMIN_PASSWORD>" \
+  -H "Authorization: Bearer <API_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
     "topicId": "<topic_id>",
@@ -89,6 +93,18 @@ curl -X POST http://127.0.0.1:3021/api/mentions \
 ```
 
 Bài viết nạp qua API sẽ tự động được chấm điểm sắc thái cảm xúc và kích hoạt chuông cảnh báo tương ứng.
+
+Mọi đường `/api/*` đều cần đăng nhập: gửi `Authorization: Bearer <API_TOKEN>` (chưa đặt `API_TOKEN` thì dùng `ADMIN_PASSWORD`), hoặc phiên đăng nhập của giao diện. Không nhận `?token=` trên URL vì mật khẩu sẽ lọt vào log của proxy.
+
+## Bảo mật cài đặt
+
+- Cookie, token, khóa API và webhook lưu trong DB được mã hóa AES-256-GCM bằng `SECRETS_KEY` (hoặc `ADMIN_PASSWORD` khi chưa đặt). Giá trị cũ còn dạng chữ thường được mã hóa lại khi khởi động. Nếu đổi khóa, trang Cài đặt báo những giá trị không giải mã được để nhập lại; trong lúc đó ứng dụng dùng giá trị trong `.env`.
+- Trang **Cài đặt** không in lại cookie, token, khóa API hay webhook ra trang; chỉ báo "Đã lưu (n ký tự)". Ô để trống thì giữ nguyên giá trị cũ; tích **Xóa giá trị đã lưu** để xóa.
+- Giới hạn đăng nhập sai (8 lần/phút) tính theo địa chỉ thật của người gọi. Header `X-Forwarded-For` chỉ được tin khi kết nối đến từ proxy trên máy hoặc mạng nội bộ (Caddy, Docker).
+- Cookie phiên tự bật cờ `Secure` khi truy cập qua HTTPS.
+- Lịch quét đọc lại **chu kỳ quét** mỗi lượt, nên đổi trong Cài đặt có hiệu lực từ lượt kế tiếp. Tần số báo chí (web) được quét theo lịch dù chưa có token nào.
+- Khi lượt quét X không đọc được thẳng bằng cookie (cookie hết hạn, IP bị chặn, X đổi mã truy vấn) mà phải lấy tạm qua Bing/DuckDuckGo, Tổng quan và Cài đặt hiện cảnh báo để thay cookie.
+- **Tra cứu nhanh** (`/search`) giữ kết quả 5 phút cho cùng câu và kênh, và gọi ra ngoài tối đa 10 lượt mỗi phút để tránh bị các nền tảng chặn IP.
 
 ## Quy trình Phối hợp Xử lý & Mẫu Phản hồi Nhanh (Giai đoạn 4)
 
@@ -103,7 +119,7 @@ Bài viết nạp qua API sẽ tự động được chấm điểm sắc thái 
   - Hỗ trợ endpoint tự động hóa cho các hệ thống Cronjob:
     ```bash
     curl -X POST http://127.0.0.1:3021/api/reports/send \
-      -H "Authorization: Bearer <ADMIN_PASSWORD>"
+      -H "Authorization: Bearer <API_TOKEN>"
     ```
 
 ## Hỗ trợ Kỹ thuật & Tích hợp

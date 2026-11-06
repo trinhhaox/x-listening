@@ -502,6 +502,8 @@ async function pullPagesWithCookie(
     query,
     count: options.maxResults,
     fetchImpl: options.fetchImpl,
+    onRoute: (route) =>
+      store.setXRoute(route, Boolean(options.twitterAuthToken.trim() && options.twitterCt0.trim()), options.now.toISOString()),
   });
 
   for (const post of posts) {

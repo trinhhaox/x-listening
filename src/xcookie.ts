@@ -19,6 +19,13 @@ const PUBLIC_WEB_BEARER =
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
+/**
+ * direct: đọc thẳng từ X bằng cookie phiên.
+ * web-index: X không trả bài (cookie hết hạn, IP bị chặn, mã GraphQL đã đổi) nên phải lấy qua Bing/DuckDuckGo — ít bài, chậm hơn.
+ * empty: không đường nào ra bài.
+ */
+export type XRoute = "direct" | "web-index" | "empty";
+
 export async function searchXWithCookie(
   options: {
     authToken?: string;
@@ -26,6 +33,8 @@ export async function searchXWithCookie(
     query: string;
     count?: number;
     fetchImpl?: typeof fetch;
+    /** Báo lại đường đã dùng để người vận hành biết khi cookie/mã truy vấn hết hạn. */
+    onRoute?: (route: XRoute) => void;
   },
 ): Promise<XCookiePost[]> {
   const authToken = options.authToken?.trim() || "";
@@ -38,6 +47,7 @@ export async function searchXWithCookie(
     try {
       const directPosts = await searchXDirectGraphQL(options.query, authToken, ct0, count, doFetch);
       if (directPosts.length > 0) {
+        options.onRoute?.("direct");
         return directPosts;
       }
     } catch {
@@ -50,12 +60,14 @@ export async function searchXWithCookie(
   try {
     const fallbackPosts = await searchXViaWebIndex(options.query, count, doFetch);
     if (fallbackPosts.length > 0) {
+      options.onRoute?.("web-index");
       return fallbackPosts;
     }
   } catch {
     // Không ném crash
   }
 
+  options.onRoute?.("empty");
   return [];
 }
 

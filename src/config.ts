@@ -5,6 +5,10 @@ const schema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3021),
   DATABASE_PATH: z.string().min(1).default("./data/listening.db"),
   ADMIN_PASSWORD: z.string().min(8, "ADMIN_PASSWORD cần ít nhất 8 ký tự"),
+  // Token riêng cho /api/*. Chưa đặt thì API dùng ADMIN_PASSWORD như trước.
+  API_TOKEN: z.string().min(16, "API_TOKEN cần ít nhất 16 ký tự").optional().or(z.literal("")),
+  // Khóa mã hóa cookie/token lưu trong DB. Chưa đặt thì dẫn xuất từ ADMIN_PASSWORD.
+  SECRETS_KEY: z.string().min(16, "SECRETS_KEY cần ít nhất 16 ký tự").optional().or(z.literal("")),
   X_BEARER_TOKEN: z.string().optional().default(""),
   TWITTER_AUTH_TOKEN: z.string().optional().default(""),
   TWITTER_CT0: z.string().optional().default(""),

@@ -184,7 +184,7 @@ test("API /api/wordcloud trả về JSON đám mây từ khóa và cụm chủ �
   );
 
   const { app } = createApp(defaultConfig, store);
-  const res = await app.request("/api/wordcloud?topic=t1");
+  const res = await app.request("/api/wordcloud?topic=t1", { headers: { authorization: `Bearer ${defaultConfig.ADMIN_PASSWORD}` } });
   assert.equal(res.status, 200);
   const json = (await res.json()) as { ok: boolean; data: { words: unknown[]; clusters: unknown[] } };
   assert.equal(json.ok, true);

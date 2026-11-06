@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { AppConfig } from "./config.js";
 import { searchXWithCookie } from "./xcookie.js";
 import { searchYoutubeVideos } from "./youtube.js";
@@ -20,6 +21,11 @@ export type SocialSearchResult = {
 
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+
+/** Mã bài ổn định từ đường link: 64 bit đầu của SHA-256 (băm 32-bit cũ dễ trùng khi nhiều bài). */
+export function stableId(prefix: string, input: string): string {
+  return prefix + createHash("sha256").update(input).digest("hex").slice(0, 16);
+}
 
 function cleanHtml(raw: string): string {
   return raw
@@ -76,7 +82,7 @@ export async function searchWebNews(
           if (!Number.isNaN(parsed.getTime())) createdAt = parsed.toISOString();
         }
 
-        const id = "web-" + Math.abs(link.split("").reduce((a, b) => ((a << 5) - a + b.charCodeAt(0)) | 0, 0)).toString(36);
+        const id = stableId("web-", link);
 
         results.push({
           id,
@@ -147,7 +153,7 @@ export async function searchFacebookPublic(
         const userMatch = link.match(/facebook\.com\/([^/?&#]+)/);
         const author = userMatch ? userMatch[1] : "Facebook User";
         const text = desc || title || "Bài viết Facebook";
-        const id = "fb-search-" + Math.abs((link + title).split("").reduce((a, b) => ((a << 5) - a + b.charCodeAt(0)) | 0, 0)).toString(36);
+        const id = stableId("fb-search-", link + title);
 
         results.push({
           id,
@@ -217,7 +223,7 @@ export async function searchThreadsPublic(
         const userMatch = link.match(/threads\.net\/@([^/?&#]+)/);
         const author = userMatch ? userMatch[1] : "threads_user";
         const text = desc || title || "Bài viết Threads";
-        const id = "th-search-" + Math.abs((link + title).split("").reduce((a, b) => ((a << 5) - a + b.charCodeAt(0)) | 0, 0)).toString(36);
+        const id = stableId("th-search-", link + title);
 
         results.push({
           id,

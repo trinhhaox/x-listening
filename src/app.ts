@@ -1,9 +1,11 @@
-import { Hono } from "hono";
+import { getConnInfo } from "@hono/node-server/conninfo";
+import { Hono, type Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { analyzePostWithAi, classifyMentionRuleBased, classifyMentionWithAi, generateAiBrief } from "./ai.js";
 import { issueSession, sessionValid } from "./auth.js";
+import { SECRET_SETTINGS } from "./secrets.js";
 import type { AppConfig } from "./config.js";
 import { muteKey, Store, type MentionView, type QueueState } from "./db.js";
 import { pageKey } from "./facebook.js";
@@ -15,10 +17,12 @@ import { lexiconWord } from "./sentiment.js";
 import { extractWordCloud } from "./cloud.js";
 import { analyzeHashtags } from "./hashtags.js";
 import { searchLiveMentions } from "./social_search.js";
+import { LiveSearchCache } from "./search_cache.js";
 import { buckets, briefMarkdown, buildBrief, dayStartIso, daysEnding, localDay, spikeReason, type Brief } from "./digest.js";
-import { briefPage, comparePage, dashboardPage, hashtagsPage, loginPage, mentionsCsv, searchPage, settingsPage } from "./pages.js";
+import { xRouteWarning, briefPage, comparePage, dashboardPage, hashtagsPage, loginPage, mentionsCsv, searchPage, settingsPage } from "./pages.js";
 
 const COOKIE = "xl_session";
+
 const attempts = new Map<string, { count: number; resetAt: number }>();
 
 export function getRuntimeConfig(base: AppConfig, store: Store): AppConfig {
@@ -45,6 +49,11 @@ export function getRuntimeConfig(base: AppConfig, store: Store): AppConfig {
 export function createApp(config: AppConfig, store: Store) {
   const app = new Hono();
   let listening = false;
+  const liveSearchCache = new LiveSearchCache<Awaited<ReturnType<typeof searchLiveMentions>>>({
+    ttlMs: 5 * 60_000,
+    maxEntries: 50,
+    maxCallsPerMinute: 10,
+  });
   let notifyError = "";
 
   async function runListen(extra?: { onlyTopicId?: string; startTime?: string }): Promise<ListenReport> {
@@ -101,7 +110,7 @@ export function createApp(config: AppConfig, store: Store) {
   });
 
   app.post("/login", async (c) => {
-    const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+    const ip = clientIp(c);
     const gate = attempts.get(ip);
     const now = Date.now();
     if (gate && gate.resetAt > now && gate.count >= 8) {
@@ -118,6 +127,7 @@ export function createApp(config: AppConfig, store: Store) {
     setCookie(c, COOKIE, issueSession(config.ADMIN_PASSWORD), {
       httpOnly: true,
       sameSite: "Lax",
+      secure: requestIsHttps(c),
       path: "/",
       maxAge: 7 * 24 * 60 * 60,
     });
@@ -125,7 +135,17 @@ export function createApp(config: AppConfig, store: Store) {
   });
 
   app.use("*", async (c, next) => {
-    if (c.req.path === "/login" || c.req.path === "/health" || c.req.path.startsWith("/api/")) return next();
+    if (c.req.path === "/login" || c.req.path === "/health") return next();
+    if (c.req.path.startsWith("/api/")) {
+      // API: nhận Bearer token ở header, hoặc phiên đăng nhập (giao diện gọi fetch cùng trang).
+      // Không nhận ?token= trên URL vì mật khẩu sẽ lọt vào log của proxy.
+      const authHeader = c.req.header("authorization") ?? "";
+      const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+      const apiToken = config.API_TOKEN || config.ADMIN_PASSWORD;
+      const ok = (bearer && passwordsMatch(bearer, apiToken)) || sessionValid(getCookie(c, COOKIE), config.ADMIN_PASSWORD);
+      if (!ok) return c.json({ ok: false, error: "Unauthorized" }, 401);
+      return next();
+    }
     if (!sessionValid(getCookie(c, COOKIE), config.ADMIN_PASSWORD)) {
       if (c.req.path.startsWith("/export")) return c.text("Cần đăng nhập", 401);
       return c.redirect("/login");
@@ -181,7 +201,8 @@ export function createApp(config: AppConfig, store: Store) {
           const hasBearer = Boolean(activeConfig.X_BEARER_TOKEN.trim());
           const hasAuth = Boolean(activeConfig.TWITTER_AUTH_TOKEN.trim());
           const hasCt0 = Boolean(activeConfig.TWITTER_CT0.trim());
-          if (hasBearer || (hasAuth && hasCt0)) return "";
+          if (hasBearer) return "";
+          if (hasAuth && hasCt0) return xRouteWarning(store.getXRoute());
           if (hasAuth && !hasCt0) return 'Đã có Cookie auth_token nhưng còn thiếu ct0 (CSRF token) của X. X yêu cầu cả 2 để quét bài viết. Vào mục <a href="/settings">Cài đặt</a> để thêm.';
           if (!hasAuth && hasCt0) return 'Đã có Cookie ct0 nhưng còn thiếu auth_token của X. Vào mục <a href="/settings">Cài đặt</a> để thêm.';
           return 'Chưa có cấu hình X (auth_token & ct0). Vào mục <a href="/settings">Cài đặt</a> để thêm.';
@@ -210,29 +231,20 @@ export function createApp(config: AppConfig, store: Store) {
   app.get("/settings", (c) => {
     const activeConfig = getRuntimeConfig(config, store);
     const notice = c.req.query("notice") ?? "";
-    return c.html(settingsPage(activeConfig, notice));
+    return c.html(settingsPage(activeConfig, notice, { unreadableSecrets: [...store.unreadableSecrets], xRoute: store.getXRoute() }));
   });
 
   app.post("/settings", async (c) => {
     const body = await c.req.parseBody();
-    const fields = [
-      "TWITTER_AUTH_TOKEN",
-      "TWITTER_CT0",
-      "X_BEARER_TOKEN",
-      "FACEBOOK_COOKIE",
-      "FACEBOOK_ACCESS_TOKEN",
-      "THREADS_ACCESS_TOKEN",
-      "YOUTUBE_API_KEY",
-      "LLM_API_KEY",
-      "LLM_BASE_URL",
-      "LLM_MODEL",
-      "ALERT_WEBHOOK_URL",
-    ];
-
-    for (const key of fields) {
-      if (body[key] !== undefined) {
-        store.setSetting(key, String(body[key] ?? "").trim());
-      }
+    // Khóa bí mật không được in lại ra trang, nên ô trống nghĩa là giữ nguyên giá trị cũ.
+    // Muốn xóa thì tích ô clear_<KEY>.
+    for (const key of SECRET_SETTINGS) {
+      const value = String(body[key] ?? "").trim();
+      if (body[`clear_${key}`] === "1") store.setSetting(key, "");
+      else if (value) store.setSetting(key, value);
+    }
+    for (const key of ["LLM_BASE_URL", "LLM_MODEL"]) {
+      if (body[key] !== undefined) store.setSetting(key, String(body[key] ?? "").trim());
     }
 
     store.setSetting("DESKTOP_NOTIFY", body.DESKTOP_NOTIFY === "1" ? "1" : "0");
@@ -348,8 +360,17 @@ export function createApp(config: AppConfig, store: Store) {
     const runtimeCfg = getRuntimeConfig(config, store);
 
     let result = undefined;
+    let searchNotice = notice;
     if (q) {
-      result = await searchLiveMentions(q, activeChannels, runtimeCfg);
+      const outcome = await liveSearchCache.get(LiveSearchCache.key(q, activeChannels), () =>
+        searchLiveMentions(q, activeChannels, runtimeCfg),
+      );
+      if ("retryAfterSec" in outcome) {
+        searchNotice = `Đang tra cứu quá nhanh, các nền tảng có thể chặn máy chủ. Thử lại sau ${outcome.retryAfterSec} giây.`;
+      } else {
+        result = outcome.value;
+        if (outcome.cached && !searchNotice) searchNotice = "Kết quả lấy từ bộ nhớ đệm (dưới 5 phút).";
+      }
     }
 
     return c.html(
@@ -357,7 +378,7 @@ export function createApp(config: AppConfig, store: Store) {
         query: q,
         selectedChannels: activeChannels,
         result,
-        notice,
+        notice: searchNotice,
       }),
     );
   });
@@ -653,11 +674,6 @@ export function createApp(config: AppConfig, store: Store) {
   });
 
   app.post("/api/mentions", async (c) => {
-    const authHeader = c.req.header("authorization") ?? "";
-    const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : (c.req.query("token") ?? "");
-    if (!bearer || !passwordsMatch(bearer, config.ADMIN_PASSWORD)) {
-      return c.json({ ok: false, error: "Unauthorized" }, 401);
-    }
 
     let json: unknown;
     try {
@@ -720,11 +736,6 @@ export function createApp(config: AppConfig, store: Store) {
   });
 
   app.post("/api/ai/analyze", async (c) => {
-    const authHeader = c.req.header("authorization") ?? "";
-    const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : (c.req.query("token") ?? "");
-    if (!bearer || !passwordsMatch(bearer, config.ADMIN_PASSWORD)) {
-      return c.json({ ok: false, error: "Unauthorized" }, 401);
-    }
 
     let json: unknown;
     try {
@@ -776,11 +787,6 @@ export function createApp(config: AppConfig, store: Store) {
   });
 
   app.post("/api/ai/classify", async (c) => {
-    const authHeader = c.req.header("authorization") ?? "";
-    const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : (c.req.query("token") ?? "");
-    if (!bearer || !passwordsMatch(bearer, config.ADMIN_PASSWORD)) {
-      return c.json({ ok: false, error: "Unauthorized" }, 401);
-    }
 
     let json: unknown;
     try {
@@ -806,11 +812,6 @@ export function createApp(config: AppConfig, store: Store) {
   });
 
   app.post("/api/reports/send", async (c) => {
-    const authHeader = c.req.header("authorization") ?? "";
-    const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : (c.req.query("token") ?? "");
-    if (!bearer || !passwordsMatch(bearer, config.ADMIN_PASSWORD)) {
-      return c.json({ ok: false, error: "Unauthorized" }, 401);
-    }
     const activeConfig = getRuntimeConfig(config, store);
     if (!activeConfig.ALERT_WEBHOOK_URL.trim()) {
       return c.json({ ok: false, error: "Chưa cấu hình ALERT_WEBHOOK_URL" }, 400);
@@ -921,4 +922,40 @@ function passwordsMatch(input: string, expected: string): boolean {
   const left = createHash("sha256").update(input).digest();
   const right = createHash("sha256").update(expected).digest();
   return timingSafeEqual(left, right);
+}
+
+function isLoopbackOrPrivate(address: string): boolean {
+  const a = address.replace(/^::ffff:/, "");
+  return (
+    a === "::1" ||
+    a.startsWith("127.") ||
+    a.startsWith("10.") ||
+    a.startsWith("192.168.") ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(a) ||
+    a.startsWith("fc") ||
+    a.startsWith("fd")
+  );
+}
+
+/**
+ * Địa chỉ người gọi để chặn dò mật khẩu. Chỉ tin header x-forwarded-for khi kết nối đến từ
+ * proxy trên máy hoặc mạng nội bộ (Caddy, Docker); gọi thẳng từ Internet thì dùng địa chỉ thật,
+ * để không thể né giới hạn bằng cách tự đặt header.
+ */
+export function clientIp(c: Context): string {
+  let remote = "";
+  try {
+    remote = getConnInfo(c).remote.address ?? "";
+  } catch {
+    remote = "";
+  }
+  const forwarded = c.req.header("x-forwarded-for")?.split(",")[0]?.trim();
+  if (forwarded && (!remote || isLoopbackOrPrivate(remote))) return forwarded;
+  return remote || "local";
+}
+
+function requestIsHttps(c: Context): boolean {
+  const proto = c.req.header("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
+  if (proto) return proto === "https";
+  return new URL(c.req.url).protocol === "https:";
 }
