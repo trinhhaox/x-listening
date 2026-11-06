@@ -1,22 +1,111 @@
 import type { Topic } from "../db.js";
-import type { Brief, DayCount } from "../digest.js";
+import { riskLabel, shiftDay, splitRisk, type Brief, type DayCount, type DigestPost } from "../digest.js";
 import { uiIcon } from "../icons.js";
-import { escapeHtml, layout } from "./layout.js";
+import { escapeHtml, formatWhen, layout } from "./layout.js";
+import { renderMarkdown } from "./markdown.js";
 
-export function briefPage(brief: Brief, notice?: string): string {
-  const negative = brief.negative
-    .map(
-      (post) => `
-      <li class="brief-item neg heroui-card-sub">
+const SENTIMENT_LABEL: Record<string, string> = { positive: "Tích cực", negative: "Tiêu cực", neutral: "Trung tính" };
+
+function vnDay(day: string): string {
+  return day.split("-").reverse().join("/");
+}
+
+function delta(now: number, before: number | undefined, worseWhenUp = false): string {
+  if (before === undefined) return "";
+  const diff = now - before;
+  if (diff === 0) return `<small class="kpi-delta flat">= hôm trước</small>`;
+  const up = diff > 0;
+  const bad = worseWhenUp ? up : false;
+  return `<small class="kpi-delta ${bad ? "bad" : up ? "up" : "down"}">${up ? "▲" : "▼"} ${Math.abs(diff)} so với hôm trước</small>`;
+}
+
+function postItem(post: DigestPost, kind: "neg" | "starred"): string {
+  const engagement = post.engagement ? `<span class="text-muted">${post.engagement} tương tác</span>` : "";
+  const link = post.url
+    ? `<a class="heroui-link" href="${escapeHtml(post.url)}" target="_blank" rel="noopener noreferrer">Xem bài gốc ${uiIcon("external", 12)}</a>`
+    : "";
+  return `
+      <li class="brief-item ${kind} heroui-card-sub">
         <div class="brief-item-head">
           <strong>@${escapeHtml(post.authorUsername)}</strong>
           <span class="source-topic-tag heroui-chip heroui-chip-bordered">${escapeHtml(post.topicName)}</span>
         </div>
         <p>${escapeHtml(post.text)}</p>
-      </li>`,
-    )
-    .join("");
+        <div class="brief-item-meta"><span class="text-muted">${escapeHtml(formatWhen(post.createdAt))}</span>${engagement}${link}</div>
+      </li>`;
+}
 
+/** Khối nhận định AI. Dùng cả khi trang tải và khi tải riêng sau. */
+export function aiBriefCard(brief: Brief, options: { hasAiKey: boolean; pending?: boolean }): string {
+  const dayField = `<input type="hidden" name="day" value="${escapeHtml(brief.day)}" />`;
+  const regenerate = options.hasAiKey
+    ? `<form method="post" action="/brief/regenerate" class="ai-regen-form">${dayField}<button class="btn btn-sm btn-outline" type="submit">${uiIcon("refresh", 14)} Viết lại nhận định</button></form>`
+    : "";
+
+  let body: string;
+  let riskChip = "";
+  if (!options.hasAiKey) {
+    body = `<p class="text-muted">Chưa có nhận định AI. Thêm khóa mô hình AI ở <a class="heroui-link" href="/settings">Cấu hình kết nối</a> để bản tin có phần đánh giá rủi ro và việc cần làm.</p>`;
+  } else if (!brief.aiSummary) {
+    body = options.pending
+      ? `<div class="ai-pending" data-ai-pending="${escapeHtml(brief.day)}"><span class="ai-spinner"></span> AI đang đọc ${brief.posts} bài và viết nhận định, thường mất 10–30 giây…</div>`
+      : brief.ai?.error
+        ? `<div class="deck-alert warning">${uiIcon("alert")} Chưa viết được nhận định: ${escapeHtml(brief.ai.error)}</div>`
+        : `<p class="text-muted">Chưa có nhận định cho ngày này.</p>`;
+  } else {
+    const { risk, reason, body: rest } = splitRisk(brief.aiSummary);
+    if (risk) {
+      riskChip = `<div class="risk-banner risk-${risk}"><strong>Mức rủi ro: ${riskLabel(risk)}</strong>${reason ? `<span>${escapeHtml(reason)}</span>` : ""}</div>`;
+    }
+    const refs = (brief.aiRefs ?? [])
+      .map(
+        (ref) => `
+          <li id="post-${ref.n}" class="ai-ref">
+            <span class="ai-ref-n">#${ref.n}</span>
+            <div>
+              <div class="ai-ref-head"><strong>@${escapeHtml(ref.author)}</strong> · ${escapeHtml(ref.topic)} · <span class="sent-${escapeHtml(ref.sentiment)}">${SENTIMENT_LABEL[ref.sentiment] ?? escapeHtml(ref.sentiment)}</span>${ref.url ? ` · <a class="heroui-link" href="${escapeHtml(ref.url)}" target="_blank" rel="noopener noreferrer">Xem bài</a>` : ""}</div>
+              <p>${escapeHtml(ref.text)}</p>
+            </div>
+          </li>`,
+      )
+      .join("");
+    const notes: string[] = [];
+    if (brief.ai?.stale && !options.pending) notes.push("Dữ liệu ngày này đã thay đổi sau lần viết; bấm “Viết lại nhận định” để cập nhật.");
+    if (brief.ai?.error) notes.push(`Lần viết lại gần nhất lỗi: ${brief.ai.error}`);
+    body = `
+      ${riskChip}
+      ${notes.map((n) => `<div class="deck-alert info">${uiIcon("info")} ${escapeHtml(n)}</div>`).join("")}
+      ${options.pending ? `<div class="ai-pending" data-ai-pending="${escapeHtml(brief.day)}"><span class="ai-spinner"></span> Đang cập nhật theo dữ liệu mới…</div>` : ""}
+      <div class="ai-markdown">${renderMarkdown(rest || brief.aiSummary)}</div>
+      ${refs ? `<details class="ai-refs" open><summary>Bài được dẫn chứng (${brief.aiRefs!.length})</summary><ol class="ai-ref-list">${refs}</ol></details>` : ""}`;
+  }
+
+  const meta =
+    brief.ai?.generatedAt && brief.aiSummary
+      ? `<small class="text-muted ai-meta">Viết lúc ${escapeHtml(formatWhen(brief.ai.generatedAt))} · ${escapeHtml(brief.ai.model)} · dựa trên ${brief.ai.basedOn} bài</small>`
+      : "";
+
+  return `
+    <section id="ai-brief-card" class="ai-brief-card heroui-card">
+      <div class="ai-brief-head">
+        <div>
+          <span class="ai-badge heroui-chip heroui-chip-primary">${uiIcon("bot", 14)} Nhận định AI</span>
+          <h2>Đánh giá rủi ro & việc cần làm</h2>
+          ${meta}
+        </div>
+        ${regenerate}
+      </div>
+      <div class="ai-brief-content">${body}</div>
+    </section>`;
+}
+
+export function briefPage(
+  brief: Brief,
+  notice: string | undefined,
+  options: { today: string; hasAiKey: boolean; pending?: boolean },
+): string {
+  const negative = brief.negative.map((post) => postItem(post, "neg")).join("");
+  const starred = brief.starred.map((post) => postItem(post, "starred")).join("");
   const authors = brief.newAuthors
     .map(
       (author) => `
@@ -30,18 +119,42 @@ export function briefPage(brief: Brief, notice?: string): string {
     )
     .join("");
 
-  const starred = brief.starred
+  const prevDay = shiftDay(brief.day, -1);
+  const nextDay = shiftDay(brief.day, 1);
+  const isToday = brief.day >= options.today;
+  const dayQuery = isToday ? "" : `?day=${encodeURIComponent(brief.day)}`;
+  const dayField = `<input type="hidden" name="day" value="${escapeHtml(brief.day)}" />`;
+
+  const total = Math.max(1, brief.posts);
+  const pct = (n: number) => Math.round((n / total) * 100);
+  const s = brief.sentiment;
+  const sentimentBar = brief.posts
+    ? `<div class="sent-bar" role="img" aria-label="Tích cực ${s.positive}, trung tính ${s.neutral}, tiêu cực ${s.negative}">
+        <span class="seg pos" style="width:${pct(s.positive)}%"></span><span class="seg neu" style="width:${pct(s.neutral)}%"></span><span class="seg neg" style="width:${pct(s.negative)}%"></span>
+      </div>
+      <div class="sent-legend"><span><i class="dot pos"></i>Tích cực ${s.positive}</span><span><i class="dot neu"></i>Trung tính ${s.neutral}</span><span><i class="dot neg"></i>Tiêu cực ${s.negative}</span></div>`
+    : `<p class="text-muted">Không có bài viết trong ngày.</p>`;
+  const topics = brief.topics
+    .slice(0, 6)
     .map(
-      (post) => `
-      <li class="brief-item starred heroui-card-sub">
-        <div class="brief-item-head">
-          <strong>@${escapeHtml(post.authorUsername)}</strong>
-          <span class="heroui-chip heroui-chip-warning">${uiIcon("starFilled", 13)} Đã lưu ý</span>
-        </div>
-        <p>${escapeHtml(post.text)}</p>
-      </li>`,
+      (t) => `<li><span>${escapeHtml(t.name)}</span><strong>${t.posts}</strong>${t.negative ? `<small class="text-danger">${t.negative} tiêu cực</small>` : ""}</li>`,
     )
     .join("");
+
+  const prev = brief.previous;
+  const script = options.pending
+    ? `<script>
+(() => {
+  const el = document.querySelector("[data-ai-pending]");
+  if (!el) return;
+  const body = new URLSearchParams({ day: el.getAttribute("data-ai-pending") || "" });
+  fetch("/brief/ai", { method: "POST", body, headers: { "content-type": "application/x-www-form-urlencoded" } })
+    .then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))))
+    .then((html) => { const card = document.getElementById("ai-brief-card"); if (card) card.outerHTML = html; })
+    .catch(() => { el.textContent = "Không tải được nhận định. Tải lại trang hoặc bấm “Viết lại nhận định”."; });
+})();
+</script>`
+    : "";
 
   return layout(
     "Báo cáo AI hàng ngày",
@@ -49,75 +162,88 @@ export function briefPage(brief: Brief, notice?: string): string {
     <div class="deck-page-header">
       <div class="page-header-title">
         <div class="title-with-badge">
-          <h1>${uiIcon("report", 22)} Báo cáo Tổng hợp Truyền thông Ngày ${escapeHtml(brief.day.split("-").reverse().join("/"))}</h1>
-          <span class="heroui-chip heroui-chip-primary">Báo cáo Tổng hợp AI</span>
+          <h1>${uiIcon("report", 22)} Báo cáo ngày ${escapeHtml(vnDay(brief.day))}</h1>
+          ${isToday ? `<span class="heroui-chip heroui-chip-primary">Hôm nay</span>` : ""}
         </div>
-        <p class="text-muted">Đánh giá rủi ro, phân loại ý kiến tiêu cực và đề xuất hành động từ trợ lý AI</p>
+        <p class="text-muted">Số liệu trong ngày, nhận định rủi ro của AI và các bài cần lưu ý</p>
       </div>
       <div class="page-header-actions">
-        <a class="btn btn-outline" href="/brief.md">${uiIcon("download")} Tải file Markdown (.md)</a>
-        <form method="post" action="/brief/send-webhook" style="display:inline-block;"><button class="btn btn-primary" type="submit">${uiIcon("send")} Gửi qua Webhook</button></form>
+        <a class="btn btn-outline" href="/brief.md${dayQuery}">${uiIcon("download")} Tải .md</a>
+        <form method="post" action="/brief/send-webhook" style="display:inline-block;">${dayField}<button class="btn btn-primary" type="submit">${uiIcon("send")} Gửi qua Webhook</button></form>
       </div>
     </div>
 
+    <nav class="brief-day-nav heroui-card" aria-label="Chọn ngày">
+      <a class="btn btn-sm btn-outline" href="/brief?day=${encodeURIComponent(prevDay)}">‹ ${escapeHtml(vnDay(prevDay).slice(0, 5))}</a>
+      <form method="get" action="/brief" class="brief-day-form">
+        <input class="heroui-input" type="date" name="day" value="${escapeHtml(brief.day)}" max="${escapeHtml(options.today)}" />
+        <button class="btn btn-sm btn-outline" type="submit">Xem</button>
+      </form>
+      ${isToday ? `<span class="btn btn-sm btn-outline is-disabled" aria-disabled="true">${escapeHtml(vnDay(nextDay).slice(0, 5))} ›</span>` : `<a class="btn btn-sm btn-outline" href="/brief?day=${encodeURIComponent(nextDay)}">${escapeHtml(vnDay(nextDay).slice(0, 5))} ›</a>`}
+      ${isToday ? "" : `<a class="btn btn-sm btn-primary" href="/brief">Hôm nay</a>`}
+    </nav>
+
     ${notice ? `<div class="deck-alert info">${uiIcon("info")} ${escapeHtml(notice)}</div>` : ""}
 
-    <!-- Chỉ số tóm tắt -->
-    <section class="executive-radar" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 24px;">
-      <div class="kpi-box heroui-card" style="padding:16px;">
-        <span class="kpi-label">Tổng bài viết ghi nhận</span>
+    <section class="brief-kpis">
+      <div class="kpi-box heroui-card">
+        <span class="kpi-label">Tổng bài viết</span>
         <strong class="kpi-val">${brief.posts.toLocaleString("vi-VN")}</strong>
+        ${delta(brief.posts, prev?.posts)}
+        ${prev ? `<small class="text-muted">TB 7 ngày: ${prev.avg7.toLocaleString("vi-VN")}/ngày</small>` : ""}
       </div>
-      <div class="kpi-box heroui-card" style="padding:16px;">
-        <span class="kpi-label">Ý kiến tiêu cực cần lưu ý</span>
+      <div class="kpi-box heroui-card">
+        <span class="kpi-label">Ý kiến tiêu cực</span>
         <strong class="kpi-val text-danger">${brief.negative.length}</strong>
+        ${delta(brief.negative.length, prev?.negative, true)}
       </div>
-      <div class="kpi-box heroui-card" style="padding:16px;">
-        <span class="kpi-label">Tác giả mới xuất hiện</span>
+      <div class="kpi-box heroui-card">
+        <span class="kpi-label">Tác giả mới</span>
         <strong class="kpi-val">${brief.newAuthors.length}</strong>
       </div>
-      <div class="kpi-box heroui-card" style="padding:16px;">
-        <span class="kpi-label">Bài viết đang lưu ý</span>
+      <div class="kpi-box heroui-card">
+        <span class="kpi-label">Bài đang lưu ý</span>
         <strong class="kpi-val text-success">${brief.starred.length}</strong>
       </div>
     </section>
 
-    <!-- Khối Executive AI Summary -->
-    <section class="ai-brief-card heroui-card" style="margin-bottom: 24px;">
-      <div class="ai-brief-head">
-        <span class="ai-badge heroui-chip heroui-chip-primary">${uiIcon("bot", 14)} Trợ lý AI Phân tích</span>
-        <h2>Tóm tắt Tình hình & Đánh giá Rủi ro Truyền thông</h2>
-      </div>
-      <div class="ai-brief-content">
-        ${brief.aiSummary
-          ? `<p>${escapeHtml(brief.aiSummary).replaceAll("\n", "<br />")}</p>`
-          : `<p class="text-muted">Chưa có tóm tắt AI. Thêm khóa mô hình AI ở <a class="heroui-link" href="/settings">Cấu hình kết nối</a> để bản tin có phần nhận định tự động.</p>`}
-      </div>
-    </section>
+    <div class="brief-main-grid">
+      ${aiBriefCard(brief, { hasAiKey: options.hasAiKey, pending: options.pending })}
+      <aside class="brief-side">
+        <div class="brief-col heroui-card">
+          <h3>Cảm xúc trong ngày</h3>
+          ${sentimentBar}
+        </div>
+        <div class="brief-col heroui-card">
+          <h3>Theo nguồn theo dõi</h3>
+          ${topics ? `<ul class="topic-split">${topics}</ul>` : `<p class="text-muted">Không có dữ liệu.</p>`}
+        </div>
+      </aside>
+    </div>
 
-    <!-- 3 Cột chi tiết -->
     <section class="brief-columns-grid">
       <div class="brief-col heroui-card">
         <h3><span class="stat-dot neg"></span> Ý kiến tiêu cực (${brief.negative.length})</h3>
         <ul class="brief-list">
-          ${negative || `<li class="empty-brief text-muted">Không có bài viết tiêu cực nào trong ngày hôm nay.</li>`}
+          ${negative || `<li class="empty-brief text-muted">Không có bài viết tiêu cực nào trong ngày.</li>`}
         </ul>
       </div>
 
       <div class="brief-col heroui-card">
-        <h3>${uiIcon("user", 16)} Tác giả mới thảo luận (${brief.newAuthors.length})</h3>
+        <h3>${uiIcon("user", 16)} Tác giả mới (${brief.newAuthors.length})</h3>
         <ul class="brief-list">
-          ${authors || `<li class="empty-brief text-muted">Không có người viết mới phát sinh trong ngày.</li>`}
+          ${authors || `<li class="empty-brief text-muted">Không có người viết mới trong ngày.</li>`}
         </ul>
       </div>
 
       <div class="brief-col heroui-card">
-        <h3>${uiIcon("starFilled", 16)} Đang lưu ý theo dõi (${brief.starred.length})</h3>
+        <h3>${uiIcon("starFilled", 16)} Đang lưu ý (${brief.starred.length})</h3>
         <ul class="brief-list">
           ${starred || `<li class="empty-brief text-muted">Không có bài viết nào được đánh dấu sao.</li>`}
         </ul>
       </div>
     </section>
+    ${script}
     `,
     "brief",
   );

@@ -21,16 +21,28 @@ export type AutoClassificationResult = {
   reason: string;
 };
 
+type CallLimits = { maxTokens?: number; timeoutMs?: number };
+
+export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5";
+export const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
+
+/** Model thực sự được gọi với cấu hình này (để ghi kèm báo cáo). */
+export function resolveModel(options: Pick<AiOptions, "baseUrl" | "model">): string {
+  const baseUrl = options.baseUrl?.trim() || "https://api.openai.com/v1";
+  return options.model?.trim() || (baseUrl.includes("anthropic.com") ? DEFAULT_ANTHROPIC_MODEL : DEFAULT_OPENAI_MODEL);
+}
+
 async function callChatCompletions(
   messages: Array<{ role: "system" | "user"; content: string }>,
   options: AiOptions,
   responseFormatJson = false,
+  limits: CallLimits = {},
 ): Promise<string> {
   const apiKey = options.apiKey.trim();
   if (!apiKey) throw new Error("Chưa cấu hình LLM_API_KEY");
 
   const baseUrl = (options.baseUrl?.trim() || "https://api.openai.com/v1").replace(/\/+$/, "");
-  const model = options.model?.trim() || (baseUrl.includes("anthropic.com") ? "claude-3-5-sonnet-20241022" : "gpt-4o-mini");
+  const model = resolveModel(options);
 
   // Hỗ trợ tự động Anthropic Messages API gốc
   if (baseUrl.includes("anthropic.com")) {
@@ -41,14 +53,14 @@ async function callChatCompletions(
 
     const anthropicPayload: Record<string, unknown> = {
       model,
-      max_tokens: 2048,
+      max_tokens: limits.maxTokens ?? 1024,
       messages: userMsgs,
     };
     if (sysMsg) {
       anthropicPayload.system = sysMsg;
     }
 
-    const response = await (options.fetchImpl ?? fetch)("https://api.anthropic.com/v1/messages", {
+    const response = await (options.fetchImpl ?? fetch)(`${baseUrl}/messages`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -56,7 +68,7 @@ async function callChatCompletions(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify(anthropicPayload),
-      signal: AbortSignal.timeout(25_000),
+      signal: AbortSignal.timeout(limits.timeoutMs ?? 25_000),
     });
 
     if (!response.ok) {
@@ -65,7 +77,11 @@ async function callChatCompletions(
     }
 
     const data = (await response.json()) as { content?: Array<{ type?: string; text?: string }> };
-    const text = data.content?.find((c) => c.type === "text")?.text?.trim() || data.content?.[0]?.text?.trim();
+    const text = (data.content ?? [])
+      .filter((c) => c.type === "text" && c.text)
+      .map((c) => c.text!)
+      .join("")
+      .trim();
     if (!text) throw new Error("Anthropic API không trả về nội dung");
     return text;
   }
@@ -89,7 +105,7 @@ async function callChatCompletions(
       authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(bodyPayload),
-    signal: AbortSignal.timeout(20_000),
+    signal: AbortSignal.timeout(limits.timeoutMs ?? 20_000),
   });
 
   if (!response.ok) {
@@ -106,49 +122,125 @@ async function callChatCompletions(
   return content;
 }
 
-export async function generateAiBrief(posts: DigestPost[], options: AiOptions): Promise<string> {
+export type BriefContext = {
+  day?: string;
+  sentiment?: { positive: number; neutral: number; negative: number };
+  topics?: { name: string; posts: number; negative: number }[];
+  previous?: { posts: number; negative: number; avg7: number };
+};
+
+const BRIEF_SAMPLE = 40;
+
+/** Chọn bài đưa cho AI: tiêu cực trước, rồi bài ghim, rồi bài nhiều tương tác. */
+export function pickBriefSample(posts: DigestPost[], limit = BRIEF_SAMPLE): DigestPost[] {
+  const byEngagement = (a: DigestPost, b: DigestPost) => (b.engagement ?? 0) - (a.engagement ?? 0);
+  const seen = new Set<string>();
+  const out: DigestPost[] = [];
+  const groups = [
+    posts.filter((p) => p.sentiment === "negative").sort(byEngagement),
+    posts.filter((p) => p.starred === 1).sort(byEngagement),
+    [...posts].sort(byEngagement),
+  ];
+  for (const group of groups) {
+    for (const post of group) {
+      const key = `${post.topicId}/${post.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(post);
+      if (out.length >= limit) return out;
+    }
+  }
+  return out;
+}
+
+const SENTIMENT_VI: Record<string, string> = { positive: "tích cực", negative: "tiêu cực", neutral: "trung tính" };
+
+export const BRIEF_SYSTEM_PROMPT = `Bạn là chuyên gia phân tích dư luận mạng xã hội và quản trị rủi ro truyền thông cho một thương hiệu Việt Nam.
+Đọc số liệu và các bài viết công khai trong ngày, rồi viết bản nhận định ngắn cho ban điều hành bằng tiếng Việt.
+
+Quy tắc:
+- Dòng đầu tiên bắt buộc đúng mẫu: "MỨC RỦI RO: Thấp|Trung bình|Cao — <một câu lý do>".
+- Sau đó đúng 3 mục, mỗi mục mở đầu bằng "## ":
+  ## Tình hình chung — 2 đến 3 câu; so sánh với hôm trước và trung bình 7 ngày khi có số liệu.
+  ## Điểm nóng — tối đa 3 gạch đầu dòng; mỗi ý dẫn số thứ tự bài làm chứng, ví dụ [#3].
+  ## Việc cần làm — tối đa 3 gạch đầu dòng; mỗi ý bắt đầu bằng bộ phận phụ trách trong ngoặc vuông, ví dụ [CSKH], [Truyền thông], [Vận hành].
+- Tổng độ dài dưới 280 từ. Không dùng bảng, không dùng emoji, không thêm tiêu đề khác.
+- Chỉ dựa vào dữ liệu được đưa; không bịa số liệu hay sự việc. Nếu dữ liệu quá ít, hoặc phần lớn bài do chính thương hiệu đăng, hãy nói rõ điều đó.`;
+
+export function buildBriefUserPrompt(posts: DigestPost[], context: BriefContext = {}): string {
+  const sample = pickBriefSample(posts);
+  const lines: string[] = [];
+  if (context.day) lines.push(`Ngày: ${context.day.split("-").reverse().join("/")}`);
+  const s = context.sentiment;
+  lines.push(
+    `Tổng số bài: ${posts.length}` +
+      (s ? ` (tích cực ${s.positive}, trung tính ${s.neutral}, tiêu cực ${s.negative})` : ""),
+  );
+  if (context.previous) {
+    lines.push(
+      `Hôm trước: ${context.previous.posts} bài, ${context.previous.negative} tiêu cực. Trung bình 7 ngày trước: ${context.previous.avg7} bài/ngày.`,
+    );
+  }
+  if (context.topics?.length) {
+    lines.push(
+      "Theo nguồn theo dõi: " +
+        context.topics
+          .slice(0, 8)
+          .map((t) => `${t.name} ${t.posts} bài${t.negative ? ` (${t.negative} tiêu cực)` : ""}`)
+          .join("; "),
+    );
+  }
+  lines.push("", `Các bài tiêu biểu (${sample.length}/${posts.length} bài, ưu tiên tiêu cực và nhiều tương tác):`);
+  sample.forEach((p, i) => {
+    const engagement = p.engagement ? ` · ${p.engagement} tương tác` : "";
+    lines.push(
+      `[#${i + 1}] [${p.topicName}] @${p.authorUsername} · ${SENTIMENT_VI[p.sentiment] ?? p.sentiment}${engagement}: ${p.text.replace(/\s+/g, " ").slice(0, 360)}`,
+    );
+  });
+  lines.push("", "Viết bản nhận định theo đúng quy tắc.");
+  return lines.join("\n");
+}
+
+/** Gọi AI viết nhận định ngày. Lỗi thì trả về error, không ném ra. */
+export async function requestAiBrief(
+  posts: DigestPost[],
+  options: AiOptions,
+  context: BriefContext = {},
+): Promise<{ text?: string; error?: string }> {
+  if (!options.apiKey.trim()) return { error: "Chưa cấu hình khóa AI (LLM_API_KEY)." };
+  if (posts.length === 0) return { text: "MỨC RỦI RO: Thấp — Không có bài viết nào trong ngày.\n\nChưa có dữ liệu để nhận định." };
+  try {
+    const text = await callChatCompletions(
+      [
+        { role: "system", content: BRIEF_SYSTEM_PROMPT },
+        { role: "user", content: buildBriefUserPrompt(posts, context) },
+      ],
+      options,
+      false,
+      { maxTokens: 1200, timeoutMs: 75_000 },
+    );
+    return { text };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/timeout|aborted/i.test(message)) return { error: "AI phản hồi quá lâu, thử lại sau ít phút." };
+    if (/fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET/i.test(message)) {
+      return { error: "Không kết nối được tới dịch vụ AI. Kiểm tra địa chỉ API trong Cấu hình hoặc mạng của máy chủ." };
+    }
+    if (/\b(401|403)\b/.test(message)) return { error: "Khóa AI không hợp lệ hoặc đã hết hạn." };
+    if (/\b(429|529)\b/.test(message)) return { error: `Dịch vụ AI đang quá tải hoặc hết hạn mức (${message.slice(0, 120)}). Thử lại sau.` };
+    return { error: message };
+  }
+}
+
+export async function generateAiBrief(posts: DigestPost[], options: AiOptions, context: BriefContext = {}): Promise<string> {
   if (!options.apiKey.trim()) {
     return "Chưa cấu hình LLM_API_KEY. Điền API Key trong file .env để kích hoạt Bản tin Tóm tắt Điều hành bằng Trí tuệ Nhân tạo.";
   }
-
   if (posts.length === 0) {
     return "Hôm nay chưa có bài viết nào trên các tần số để AI tổng hợp.";
   }
-
-  // Chọn tối đa 35 bài tiêu biểu (ưu tiên bài tiêu cực và bài được ghim)
-  const prioritized = [
-    ...posts.filter((p) => p.sentiment === "negative"),
-    ...posts.filter((p) => p.starred === 1),
-    ...posts.filter((p) => p.sentiment !== "negative" && p.starred !== 1),
-  ].slice(0, 35);
-
-  const sampleTexts = prioritized
-    .map(
-      (p, i) =>
-        `${i + 1}. [${p.topicName}] @${p.authorUsername} (${p.sentiment}): ${p.text.replace(/\s+/g, " ").slice(0, 200)}`,
-    )
-    .join("\n");
-
-  const systemPrompt = `Bạn là Chuyên gia Phân tích Dư luận Mạng xã hội & Quản trị Rủi ro Khủng hoảng Truyền thông.
-Nhiệm vụ của bạn là đọc các bài viết công khai trên mạng xã hội hôm nay và lập Bản tóm tắt Điều hành (Executive Brief) ngắn gọn, sắc sảo bằng tiếng Việt.
-Yêu cầu định dạng phản hồi bằng Markdown gồm 3 phần:
-1. **Tổng quan Nhịp điệu Dư luận:** Đánh giá xu hướng chung (bình yên, sôi nổi, hay có nguy cơ rủi ro).
-2. **Điểm nóng & Động lực chính (Key Drivers):** Tóm tắt các chủ đề được nhắc nhiều, vì sao người dùng hài lòng hoặc bức xúc.
-3. **Khuyến nghị Hành động (Actionable Next Steps):** Đưa ra 2-3 gợi ý cụ thể cho bộ phận chăm sóc khách hàng hoặc truyền thông.`;
-
-  const userPrompt = `Dưới đây là các bài viết tiêu biểu ghi nhận được hôm nay:\n\n${sampleTexts}\n\nHãy phân tích và viết Bản tóm tắt Điều hành theo yêu cầu.`;
-
-  try {
-    return await callChatCompletions(
-      [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      options,
-    );
-  } catch (error) {
-    return `Không thể tạo tóm tắt AI: ${error instanceof Error ? error.message : String(error)}`;
-  }
+  const result = await requestAiBrief(posts, options, context);
+  return result.text ?? `Không thể tạo tóm tắt AI: ${result.error}`;
 }
 
 export async function analyzePostWithAi(text: string, options: AiOptions): Promise<AiSentimentResult | null> {

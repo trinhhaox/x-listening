@@ -5,9 +5,10 @@ import { extractWordCloud } from "../cloud.js";
 import { analyzeHashtags } from "../hashtags.js";
 import { searchLiveMentions } from "../social_search.js";
 import { LiveSearchCache } from "../search_cache.js";
-import { buckets, briefMarkdown, dayStartIso, daysEnding, localDay, spikeReason } from "../digest.js";
+import { buckets, briefMarkdown, dayStartIso, daysEnding, localDay, readDay, spikeReason } from "../digest.js";
 import { xRouteWarning, briefPage, comparePage, dashboardPage, hashtagsPage, mentionsCsv, searchPage, settingsPage } from "../pages.js";
-import { outboundLabel, todayBrief, readView } from "../http/helpers.js";
+import { briefForDay, outboundLabel, readView } from "../http/helpers.js";
+import { aiBriefCard } from "../views/brief.js";
 import { getRuntimeConfig } from "../runtime_config.js";
 import { lastReportResult, normalizeReportTime } from "../daily.js";
 import type { AppContext } from "../http/context.js";
@@ -126,28 +127,53 @@ export function registerPagesRoutes(app: Hono, ctx: AppContext): void {
   app.get("/brief", async (c) => {
     const activeConfig = getRuntimeConfig(config, store);
     const notice = c.req.query("notice") ?? "";
-    const brief = await todayBrief(store, activeConfig);
-    return c.html(briefPage(brief, notice));
+    const today = localDay(new Date());
+    const day = readDay(c.req.query("day"));
+    const hasAiKey = Boolean(activeConfig.LLM_API_KEY.trim());
+    // Trang mở ngay với bản đã lưu; nếu chưa có hoặc dữ liệu đã đổi thì trình duyệt tự xin AI viết sau.
+    const brief = await briefForDay(store, activeConfig, day, undefined, { cachedOnly: true });
+    const pending = hasAiKey && brief.posts > 0 && (!brief.aiSummary || Boolean(brief.ai?.stale));
+    return c.html(briefPage(brief, notice, { today, hasAiKey, pending }));
+  });
+
+  app.post("/brief/ai", async (c) => {
+    const activeConfig = getRuntimeConfig(config, store);
+    const body = await c.req.parseBody();
+    const day = readDay(String(body.day ?? ""));
+    const brief = await briefForDay(store, activeConfig, day);
+    return c.html(aiBriefCard(brief, { hasAiKey: Boolean(activeConfig.LLM_API_KEY.trim()) }));
+  });
+
+  app.post("/brief/regenerate", async (c) => {
+    const activeConfig = getRuntimeConfig(config, store);
+    const body = await c.req.parseBody();
+    const day = readDay(String(body.day ?? ""));
+    const back = (msg: string) => c.redirect(`/brief?day=${encodeURIComponent(day)}&notice=${encodeURIComponent(msg)}`);
+    if (!activeConfig.LLM_API_KEY.trim()) return back("Chưa cấu hình khóa AI.");
+    const brief = await briefForDay(store, activeConfig, day, undefined, { force: true });
+    if (brief.ai?.error) return back(`Không viết lại được: ${brief.ai.error}`);
+    return back("Đã viết lại nhận định AI theo dữ liệu mới nhất.");
   });
 
   app.post("/brief/send-webhook", async (c) => {
     const activeConfig = getRuntimeConfig(config, store);
-    if (!activeConfig.ALERT_WEBHOOK_URL.trim()) {
-      return c.redirect("/brief?notice=" + encodeURIComponent("Chưa cấu hình ALERT_WEBHOOK_URL"));
-    }
-    const brief = await todayBrief(store, activeConfig);
+    const body = await c.req.parseBody();
+    const day = readDay(String(body.day ?? ""));
+    const back = (msg: string) => c.redirect(`/brief?day=${encodeURIComponent(day)}&notice=${encodeURIComponent(msg)}`);
+    if (!activeConfig.ALERT_WEBHOOK_URL.trim()) return back("Chưa cấu hình ALERT_WEBHOOK_URL");
+    const brief = await briefForDay(store, activeConfig, day);
     const err = await deliverExecutiveReport(brief, activeConfig.ALERT_WEBHOOK_URL);
-    if (err) {
-      return c.redirect("/brief?notice=" + encodeURIComponent(`Không gửi được báo cáo: ${err}`));
-    }
-    return c.redirect("/brief?notice=" + encodeURIComponent("Đã gửi báo cáo điều hành qua Webhook thành công!"));
+    if (err) return back(`Không gửi được báo cáo: ${err}`);
+    return back("Đã gửi báo cáo qua Webhook.");
   });
 
   app.get("/brief.md", async (c) => {
-    const brief = await todayBrief(store, config);
+    const activeConfig = getRuntimeConfig(config, store);
+    const day = readDay(c.req.query("day"));
+    const brief = await briefForDay(store, activeConfig, day);
     return c.body(briefMarkdown(brief), 200, {
       "content-type": "text/markdown; charset=utf-8",
-      "content-disposition": "attachment; filename=ban-tin.md",
+      "content-disposition": `attachment; filename=ban-tin-${day}.md`,
     });
   });
 

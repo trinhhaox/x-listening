@@ -525,7 +525,8 @@ export class Store {
     const rows = this.db
       .prepare(
         `SELECT m.id, m.topic_id, t.name AS topic_name, m.text, m.author_username, m.author_name,
-                m.created_at, m.sentiment, m.starred
+                m.created_at, m.sentiment, m.starred, m.url,
+                (m.like_count + m.repost_count + m.reply_count + m.quote_count) AS engagement
          FROM mentions m JOIN topics t ON t.id = m.topic_id
          WHERE m.hidden = 0 AND ${HEARD_M} AND m.created_at >= ?
          ORDER BY m.created_at ASC`,
@@ -540,6 +541,8 @@ export class Store {
       created_at: string;
       sentiment: string;
       starred: number;
+      url: string | null;
+      engagement: number | null;
     }>;
     return rows.map((row) => ({
       id: row.id,
@@ -551,6 +554,8 @@ export class Store {
       createdAt: row.created_at,
       sentiment: row.sentiment,
       starred: row.starred,
+      url: row.url ?? "",
+      engagement: Number(row.engagement ?? 0),
     }));
   }
 
@@ -941,6 +946,14 @@ export class Store {
     } catch {
       return undefined;
     }
+  }
+
+  /** Xóa các khóa cài đặt có tiền tố cho trước và nhỏ hơn mốc (ví dụ bản nhận định AI cũ theo ngày). */
+  pruneSettings(prefix: string, belowKey: string): number {
+    const result = this.db
+      .prepare("DELETE FROM settings WHERE substr(key, 1, ?) = ? AND key < ?")
+      .run(prefix.length, prefix, belowKey);
+    return Number(result.changes);
   }
 
   getAllSettings(): Record<string, string> {

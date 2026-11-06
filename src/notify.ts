@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { riskLabel, splitRisk } from "./digest.js";
+import { markdownToPlain } from "./views/markdown.js";
 
 export type HitNotice = {
   id: string;
@@ -133,6 +135,12 @@ function desktopNotify(title: string, body: string): void {
   execFile("osascript", ["-e", `display notification ${JSON.stringify(body)} with title ${JSON.stringify(title)}`], { timeout: 3000 }, () => {});
 }
 
+/** Cắt độ dài nhưng giữ xuống dòng (cho phần nhận định nhiều dòng). */
+function clipBlock(value: string, max: number): string {
+  const text = value.replace(/\r/g, "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
 function clip(value: string, max: number): string {
   return value.replace(/\s+/g, " ").trim().slice(0, max);
 }
@@ -174,22 +182,28 @@ export async function deliverExecutiveReport(
   const statsSummary = `${brief.posts} bài · ${negCount} nghiêng xấu · ${newAuthCount} người mới · ${starCount} ghim`;
   const url = target.toLowerCase();
 
+  // Tách dòng "MỨC RỦI RO" khỏi thân nhận định để đưa lên đầu tin.
+  const split = brief.aiSummary ? splitRisk(brief.aiSummary) : undefined;
+  const riskLine = split?.risk ? `Mức rủi ro: ${riskLabel(split.risk)}${split.reason ? ` — ${split.reason}` : ""}` : "";
+  const aiBody = split ? split.body || brief.aiSummary!.trim() : "";
+  const riskIcon = split?.risk === "high" ? "🔴" : split?.risk === "medium" ? "🟠" : split?.risk === "low" ? "🟢" : "";
+
   let payload: unknown;
   const chatId = telegramChatId(target);
   if (chatId) {
     const title = brief.title ?? `Báo cáo Dư luận Điều hành ngày ${dayFormatted}`;
     payload = telegramPayload(
       chatId,
-      `📊 ${title}\n${statsSummary}${brief.aiSummary ? `\n\nTóm tắt Điều hành AI:\n${brief.aiSummary.trim().slice(0, 3000)}` : ""}`,
+      `📊 ${title}\n${statsSummary}${riskLine ? `\n${riskIcon} ${riskLine}` : ""}${aiBody ? `\n\n${markdownToPlain(aiBody).slice(0, 3200)}` : ""}`,
     );
   } else if (url.includes("discord.com/api/webhooks")) {
     payload = {
-      content: `📊 **${brief.title ?? `Báo cáo Dư luận Điều hành ngày ${dayFormatted}`}**\n${statsSummary}`,
-      embeds: brief.aiSummary
+      content: `📊 **${brief.title ?? `Báo cáo Dư luận Điều hành ngày ${dayFormatted}`}**\n${statsSummary}${riskLine ? `\n${riskIcon} **${riskLine}**` : ""}`,
+      embeds: aiBody
         ? [
             {
-              title: "Tóm tắt Điều hành AI",
-              description: clip(brief.aiSummary, 1500),
+              title: "Nhận định AI",
+              description: clipBlock(aiBody, 3800),
               color: 3447003,
             },
           ]
@@ -203,16 +217,16 @@ export async function deliverExecutiveReport(
           type: "section",
           text: {
             type: "mrkdwn",
-            text: `📊 *Báo cáo Dư luận Điều hành ngày ${dayFormatted}*\n*Số liệu:* ${statsSummary}`,
+            text: `📊 *Báo cáo Dư luận Điều hành ngày ${dayFormatted}*\n*Số liệu:* ${statsSummary}${riskLine ? `\n${riskIcon} *${riskLine}*` : ""}`,
           },
         },
-        ...(brief.aiSummary
+        ...(aiBody
           ? [
               {
                 type: "section",
                 text: {
                   type: "mrkdwn",
-                  text: `*Tóm tắt Điều hành AI:*\n>${clip(brief.aiSummary, 1500).replaceAll("\n", "\n>")}`,
+                  text: clipBlock(markdownToPlain(aiBody), 2900),
                 },
               },
             ]
@@ -228,6 +242,7 @@ export async function deliverExecutiveReport(
       newAuthors: newAuthCount,
       starred: starCount,
       aiSummary: brief.aiSummary ?? "",
+      risk: split?.risk ?? "",
     };
   }
 

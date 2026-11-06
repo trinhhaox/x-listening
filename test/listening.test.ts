@@ -1101,7 +1101,7 @@ test("deliverExecutiveReport gửi báo cáo điều hành tới webhook", async
   assert.equal(discordErr, null);
   assert.match(capturedBody.content, /Báo cáo Dư luận Điều hành ngày 14\/10\/2026/);
   assert.equal(capturedBody.embeds.length, 1);
-  assert.equal(capturedBody.embeds[0].title, "Tóm tắt Điều hành AI");
+  assert.equal(capturedBody.embeds[0].title, "Nhận định AI");
 
   // Test Slack Webhook
   const slackErr = await deliverExecutiveReport(reportData, {
