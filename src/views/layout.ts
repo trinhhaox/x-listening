@@ -51,6 +51,7 @@ function renderNavbar(activeTab: string): string {
         <a class="nav-item ${activeTab === "brief" ? "active" : ""}" href="/brief">${uiIcon("report")} Báo cáo AI</a>
         <a class="nav-item ${activeTab === "hashtags" ? "active" : ""}" href="/hashtags">${uiIcon("flame")} Xu hướng</a>
         <a class="nav-item ${activeTab === "compare" ? "active" : ""}" href="/compare">${uiIcon("compare")} So sánh</a>
+        ${isAdmin ? `<a class="nav-item ${activeTab === "users" ? "active" : ""}" href="/users">${uiIcon("users")} Nhân viên</a>` : ""}
         ${isAdmin ? `<a class="nav-item ${activeTab === "settings" ? "active" : ""}" href="/settings">${uiIcon("settings")} Cấu hình</a>` : ""}
       </nav>
 

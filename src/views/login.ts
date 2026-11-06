@@ -1,6 +1,8 @@
 import { uiIcon } from "../icons.js";
+import type { UserRow } from "../db.js";
 import { OWNER, ROLE_HINTS, ROLE_LABELS, currentViewer, formatPhone } from "../users.js";
 import { escapeHtml, layout } from "./layout.js";
+import { renderUserManagementSection } from "./users.js";
 
 export function loginPage(error = "", phone = ""): string {
   return layout(
@@ -48,12 +50,25 @@ export function forbiddenPage(message: string): string {
   );
 }
 
-export function accountPage(notice = ""): string {
+export function accountPage(notice = "", users: UserRow[] = []): string {
   const viewer = currentViewer() ?? OWNER;
   const isOwner = viewer.id === OWNER.id;
+  const isAdmin = viewer.role === "admin";
   return layout(
     "Tài khoản của tôi",
-    `${pageHeader(`${uiIcon("user", 22)} Tài khoản của tôi`, "Thông tin đăng nhập và đổi mật khẩu.")}
+    `<div class="deck-page-header">
+      <div class="page-header-title">
+        <div class="title-with-badge">
+          <h1>${uiIcon("user", 22)} Tài khoản của tôi</h1>
+          <span class="heroui-chip role-chip role-${viewer.role}">${ROLE_LABELS[viewer.role]}</span>
+        </div>
+        <p class="text-muted">Thông tin tài khoản đăng nhập cá nhân, bảo mật mật khẩu${isAdmin ? " và phân quyền nhân viên" : ""}.</p>
+      </div>
+      <div class="page-header-actions">
+        ${isAdmin ? `<a class="btn btn-primary" href="/users">${uiIcon("users", 14)} Quản lý Nhân sự & Phân quyền</a>` : ""}
+        <a class="btn btn-outline" href="/">← Quay lại Tổng quan</a>
+      </div>
+    </div>
     ${notice ? `<div class="deck-alert info">${uiIcon("info")} ${escapeHtml(notice)}</div>` : ""}
     <div class="settings-grid account-grid">
       <div class="settings-card heroui-card">
@@ -76,7 +91,19 @@ export function accountPage(notice = ""): string {
         </form>`
         }
       </div>
-    </div>`,
+    </div>
+    ${isAdmin ? `
+      <div style="margin-top:32px;">
+        <div class="deck-section-title" style="margin-bottom:16px; display:flex; align-items:center; justify-content:space-between;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:1.15rem; font-weight:700; color:var(--text);">${uiIcon("users", 20)} Quản lý Nhân viên & Phân quyền</span>
+            <span class="heroui-chip heroui-chip-primary">Dành cho Quản trị viên</span>
+          </div>
+          <a href="/users" class="btn btn-sm btn-outline">Xem trang riêng ${uiIcon("external", 12)}</a>
+        </div>
+        ${renderUserManagementSection(users, "", "/account")}
+      </div>
+    ` : ""}`,
     "account",
   );
 }

@@ -120,7 +120,7 @@ export function registerAuthRoutes(app: Hono, ctx: AppContext): void {
     return c.redirect("/login");
   });
 
-  app.get("/account", (c) => c.html(accountPage(c.req.query("notice") ?? "")));
+  app.get("/account", (c) => c.html(accountPage(c.req.query("notice") ?? "", store.listUsers())));
 
   app.post("/account/password", async (c) => {
     const viewer = viewerFromCookie(getCookie(c, COOKIE), secret, store);

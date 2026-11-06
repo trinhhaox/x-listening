@@ -1646,14 +1646,15 @@ export const STYLES = `    :root {
     .user-add-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; align-items: end; }
     .role-legend { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 6px; font-size: 13px; color: var(--heroui-default-600, #555); }
     .users-card { margin-top: 16px; }
-    .table-scroll { overflow-x: auto; }
+    .table-scroll { overflow-x: auto; border-radius: 10px; border: 1px solid var(--heroui-default-200, #e5e7eb); }
     .users-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .users-table th { text-align: left; font-weight: 600; padding: 8px; border-bottom: 1px solid var(--heroui-default-200, #e5e7eb); white-space: nowrap; }
-    .users-table td { padding: 8px; border-bottom: 1px solid var(--heroui-default-100, #f1f5f9); vertical-align: middle; }
+    .users-table th { text-align: left; font-weight: 600; padding: 10px 12px; background: var(--heroui-default-50, #f8fafc); border-bottom: 1px solid var(--heroui-default-200, #e5e7eb); white-space: nowrap; color: var(--heroui-default-700, #374151); }
+    .users-table td { padding: 10px 12px; border-bottom: 1px solid var(--heroui-default-100, #f1f5f9); vertical-align: middle; }
     .users-table td .heroui-input { min-width: 120px; }
+    .users-table tr:last-child td { border-bottom: none; }
     .users-table tr.user-locked td { opacity: .6; }
-    .user-active { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-    .user-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .user-active { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer; }
+    .user-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
     .user-actions form { margin: 0; }
     .user-reset { position: relative; }
     .user-reset summary { list-style: none; cursor: pointer; }

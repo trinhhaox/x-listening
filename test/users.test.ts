@@ -133,6 +133,25 @@ test("phân quyền: Chỉ xem không sửa được, Xử lý không vào đư�
 
   // Chủ hệ thống (mật khẩu .env) vẫn toàn quyền như trước.
   assert.equal((await app.request("/users", { headers: { cookie: `xl_session=${issueSession(SECRET)}` } })).status, 200);
+
+  // Admin vào trang /account thấy khối Quản lý Nhân viên & Phân quyền và tạo user quay lại /account
+  const accRes = await app.request("/account", { headers: { cookie: c(admin) } });
+  assert.equal(accRes.status, 200);
+  const accHtml = await accRes.text();
+  assert.match(accHtml, /Quản lý Nhân viên & Phân quyền/);
+  assert.match(accHtml, /Thêm tài khoản nhân viên mới/);
+  assert.match(accHtml, /href="\/users"/);
+
+  const createFromAcc = await app.request("/users", post(c(admin), {
+    name: "Nhân viên Mới",
+    phone: "0988 888 888",
+    password: "matkhaumoi88",
+    role: "editor",
+    back: "/account",
+  }));
+  assert.equal(createFromAcc.status, 302);
+  assert.match(createFromAcc.headers.get("location")!, /^\/account\?notice=/);
+  assert.ok(store.getUserByPhone("0988888888"));
 });
 
 test("tự đổi mật khẩu: cần mật khẩu cũ, đổi xong thiết bị khác bị đăng xuất", async () => {
