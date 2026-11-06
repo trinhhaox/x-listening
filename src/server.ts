@@ -7,6 +7,12 @@ import { SettingsCipher } from "./secrets.js";
 
 const config = loadConfig();
 const store = Store.open(config.DATABASE_PATH);
+if (store.migration.from !== store.migration.to) {
+  console.log(
+    `[db] cập nhật cấu trúc v${store.migration.from} → v${store.migration.to}` +
+      (store.migration.backup ? `; bản sao lưu: ${store.migration.backup}` : ""),
+  );
+}
 store.useSettingsCipher(new SettingsCipher(config.SECRETS_KEY || config.ADMIN_PASSWORD));
 if (store.unreadableSecrets.size > 0) {
   console.warn(

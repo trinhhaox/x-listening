@@ -106,6 +106,13 @@ Mọi đường `/api/*` đều cần đăng nhập: gửi `Authorization: Beare
 - Khi lượt quét X không đọc được thẳng bằng cookie (cookie hết hạn, IP bị chặn, X đổi mã truy vấn) mà phải lấy tạm qua Bing/DuckDuckGo, Tổng quan và Cài đặt hiện cảnh báo để thay cookie.
 - **Tra cứu nhanh** (`/search`) giữ kết quả 5 phút cho cùng câu và kênh, và gọi ra ngoài tối đa 10 lượt mỗi phút để tránh bị các nền tảng chặn IP.
 
+## Cấu trúc mã và cập nhật DB
+
+- `src/app.ts` lắp ráp ứng dụng; route chia theo nhóm trong `src/routes/` (`auth`, `pages`, `actions`, `api`), tiện ích HTTP trong `src/http/`.
+- Giao diện nằm trong `src/views/` (mỗi trang một file, CSS chung ở `styles.ts`); `src/pages.ts` chỉ xuất lại để giữ đường import cũ.
+- Cấu trúc DB có số phiên bản (`PRAGMA user_version`), các bước nằm trong `src/migrations.ts`. Khi khởi động, bước nào còn thiếu sẽ chạy trong một transaction; lỗi thì hoàn tác. Trước lần cập nhật đầu tiên, ứng dụng tự sao lưu `data/listening.db.bak-v<phiên bản cũ>`.
+- Muốn đổi cấu trúc: thêm một mục mới vào cuối `MIGRATIONS`, không sửa mục đã có. DB của bản mới hơn sẽ bị từ chối mở thay vì đoán.
+
 ## Quy trình Phối hợp Xử lý & Mẫu Phản hồi Nhanh (Giai đoạn 4)
 
 - **Gán Người Xử lý (Assignee) & Gắn Nhãn (Tagging):**

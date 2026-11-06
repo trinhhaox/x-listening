@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { runMigrations } from "./migrations.js";
 import { alertReason, type AlertKind, type AlertRule } from "./alerts.js";
 import type { DigestPost } from "./digest.js";
 
@@ -122,6 +123,8 @@ export class Store {
   private cipher: SettingsCipher | undefined;
   /** Các khóa bí mật có trong DB nhưng không giải mã được (khóa mã hóa đã đổi). */
   readonly unreadableSecrets = new Set<string>();
+  /** Kết quả cập nhật cấu trúc DB lúc mở (phiên bản trước/sau, file sao lưu nếu có). */
+  migration: { from: number; to: number; backup?: string } = { from: 0, to: 0 };
 
   constructor(private readonly db: DatabaseSync) {}
 
@@ -150,92 +153,10 @@ export class Store {
     const db = new DatabaseSync(path);
     db.exec("PRAGMA journal_mode = WAL");
     db.exec("PRAGMA foreign_keys = ON");
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS topics (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        query TEXT NOT NULL,
-        exclude_reposts INTEGER NOT NULL DEFAULT 1,
-        active INTEGER NOT NULL DEFAULT 1,
-        since_id TEXT,
-        last_listened_at TEXT,
-        last_error TEXT,
-        created_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS mentions (
-        id TEXT NOT NULL,
-        topic_id TEXT NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
-        text TEXT NOT NULL,
-        author_username TEXT NOT NULL,
-        author_name TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        lang TEXT NOT NULL DEFAULT '',
-        like_count INTEGER NOT NULL DEFAULT 0,
-        repost_count INTEGER NOT NULL DEFAULT 0,
-        reply_count INTEGER NOT NULL DEFAULT 0,
-        quote_count INTEGER NOT NULL DEFAULT 0,
-        sentiment TEXT NOT NULL,
-        sentiment_score INTEGER NOT NULL,
-        sample INTEGER NOT NULL DEFAULT 0,
-        fetched_at TEXT NOT NULL,
-        PRIMARY KEY (id, topic_id)
-      );
-      CREATE INDEX IF NOT EXISTS mentions_created ON mentions(created_at DESC);
-      CREATE TABLE IF NOT EXISTS alerts (
-        id TEXT PRIMARY KEY,
-        topic_id TEXT REFERENCES topics(id) ON DELETE CASCADE,
-        name TEXT NOT NULL,
-        kind TEXT NOT NULL,
-        phrase TEXT NOT NULL DEFAULT '',
-        min_likes INTEGER NOT NULL DEFAULT 0,
-        active INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS alert_hits (
-        id TEXT PRIMARY KEY,
-        alert_id TEXT NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
-        mention_id TEXT NOT NULL,
-        topic_id TEXT NOT NULL,
-        reason TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        seen INTEGER NOT NULL DEFAULT 0,
-        UNIQUE (alert_id, mention_id, topic_id)
-      );
-      CREATE TABLE IF NOT EXISTS muted_authors (
-        username TEXT PRIMARY KEY,
-        created_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS lexicon (
-        word TEXT PRIMARY KEY,
-        polarity TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS response_templates (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        content TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-    `);
-    ensureColumn(db, "mentions", "starred", "starred INTEGER NOT NULL DEFAULT 0");
-    ensureColumn(db, "mentions", "hidden", "hidden INTEGER NOT NULL DEFAULT 0");
-    ensureColumn(db, "mentions", "note", "note TEXT NOT NULL DEFAULT ''");
-    ensureColumn(db, "mentions", "queue", "queue TEXT NOT NULL DEFAULT 'new'");
-    ensureColumn(db, "mentions", "url", "url TEXT NOT NULL DEFAULT ''");
-    ensureColumn(db, "mentions", "assigned_to", "assigned_to TEXT NOT NULL DEFAULT ''");
-    ensureColumn(db, "mentions", "tag", "tag TEXT NOT NULL DEFAULT ''");
-    ensureColumn(db, "topics", "source", "source TEXT NOT NULL DEFAULT 'x'");
-    ensureColumn(db, "topics", "phrase", "phrase TEXT NOT NULL DEFAULT ''");
-    ensureColumn(db, "alert_hits", "notified", "notified INTEGER NOT NULL DEFAULT 1");
-    ensureColumn(db, "alerts", "threshold_count", "threshold_count INTEGER NOT NULL DEFAULT 3");
-    ensureColumn(db, "alerts", "time_window_minutes", "time_window_minutes INTEGER NOT NULL DEFAULT 60");
-    db.exec("CREATE INDEX IF NOT EXISTS mentions_topic_url ON mentions(topic_id, url)");
-    return new Store(db);
+    const migration = runMigrations(db, path);
+    const store = new Store(db);
+    store.migration = migration;
+    return store;
   }
 
   close(): void {
@@ -1024,11 +945,4 @@ function mentionFilter(view: MentionView): string {
   if (view === "starred") return "m.starred = 1 AND m.hidden = 0";
   if (view === "new" || view === "reading" || view === "done") return `m.hidden = 0 AND m.queue = '${view}'`;
   return "m.hidden = 0";
-}
-
-function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string): void {
-  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-  if (!columns.some((item) => item.name === column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
-  }
 }
