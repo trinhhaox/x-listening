@@ -447,6 +447,18 @@ export const STYLES = `    :root {
       background: rgba(255, 255, 255, 0.55);
       opacity: 0.85;
     }
+    .card-reply { margin-top: 8px; border-top: 1px dashed var(--heroui-divider, #E4E4E7); padding-top: 8px; }
+    .card-reply > summary { cursor: pointer; font-size: 12.5px; color: var(--heroui-foreground-500, #71717A); list-style: none; display: inline-flex; align-items: center; gap: 6px; }
+    .card-reply > summary::-webkit-details-marker { display: none; }
+    .card-reply .draft-mark { font-size: 11px; padding: 1px 6px; border-radius: 999px; background: #FEF3C7; color: #92400E; }
+    .reply-form { display: grid; gap: 8px; margin-top: 8px; }
+    .reply-text { width: 100%; min-height: 72px; resize: vertical; font: inherit; line-height: 1.5; padding: 8px 10px; box-sizing: border-box; }
+    .reply-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .reply-actions .heroui-select { max-width: 180px; }
+    .response-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+    .response-kpis > div { display: grid; gap: 2px; }
+    .response-kpis strong { font-size: 18px; }
+    .response-card > small { display: block; margin-top: 6px; }
 
     /* EXECUTIVE RADAR GRID */
     .executive-radar {

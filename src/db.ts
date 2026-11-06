@@ -56,6 +56,12 @@ export type Mention = {
   /** Ai chấm cảm xúc: lexicon (đếm từ), ai, manual (người sửa tay). */
   sentiment_source: SentimentSource;
   sentiment_reason: string;
+  /** Nháp câu trả lời người trực đang soạn. */
+  reply_draft: string;
+  /** Lần đầu bài được nhận xử lý (Đang xử lý hoặc Đã xong). */
+  reading_at: string | null;
+  /** Lúc bài được đánh dấu Đã xong; trống khi mở lại. */
+  done_at: string | null;
 };
 
 export type SentimentSource = "lexicon" | "ai" | "manual";
@@ -455,11 +461,35 @@ export class Store {
     this.db.prepare("DELETE FROM response_templates WHERE id = ?").run(id);
   }
 
-  setMentionQueue(topicId: string, mentionId: string, queue: QueueState): boolean {
+  setMentionQueue(topicId: string, mentionId: string, queue: QueueState, at = new Date().toISOString()): boolean {
     const result = this.db
-      .prepare("UPDATE mentions SET queue = ? WHERE topic_id = ? AND id = ?")
-      .run(queue, topicId, mentionId);
+      .prepare(
+        `UPDATE mentions SET
+           queue = ?1,
+           reading_at = CASE WHEN ?1 = 'new' THEN reading_at ELSE COALESCE(reading_at, ?2) END,
+           done_at = CASE WHEN ?1 = 'done' THEN CASE WHEN queue = 'done' THEN COALESCE(done_at, ?2) ELSE ?2 END ELSE NULL END
+         WHERE topic_id = ?3 AND id = ?4`,
+      )
+      .run(queue, at, topicId, mentionId);
     return result.changes > 0;
+  }
+
+  setReplyDraft(topicId: string, mentionId: string, draft: string): boolean {
+    const result = this.db
+      .prepare("UPDATE mentions SET reply_draft = ? WHERE topic_id = ? AND id = ?")
+      .run(draft.trim().slice(0, 2000), topicId, mentionId);
+    return result.changes > 0;
+  }
+
+  /** Bài tiêu cực (thật, không ẩn) được thấy trong khoảng [since, until), để đo tốc độ xử lý. */
+  listNegativeForResponse(sinceIso: string, untilIso: string): Array<{ queue: QueueState; assigned_to: string; fetched_at: string; done_at: string | null }> {
+    return this.db
+      .prepare(
+        `SELECT queue, assigned_to, fetched_at, done_at FROM mentions
+         WHERE sentiment = 'negative' AND sample = 0 AND hidden = 0 AND ${HEARD}
+           AND fetched_at >= ? AND fetched_at < ?`,
+      )
+      .all(sinceIso, untilIso) as Array<{ queue: QueueState; assigned_to: string; fetched_at: string; done_at: string | null }>;
   }
 
   listMuted(): string[] {

@@ -1,3 +1,4 @@
+import { computeResponseStats } from "../response.js";
 import { pickBriefSample, requestAiBrief, resolveModel } from "../ai.js";
 import type { AppConfig } from "../config.js";
 import { Store, type MentionView, type QueueState } from "../db.js";
@@ -104,6 +105,13 @@ export async function briefForDay(
     negative: yesterdayPosts.filter((post) => post.sentiment === "negative").length,
     avg7: Math.round((prior.length / 7) * 10) / 10,
   };
+
+  const responseEnd = new Date(Math.min(Date.now(), Date.parse(dayStartIso(shiftDay(day, 1)))));
+  base.response = computeResponseStats(
+    store.listNegativeForResponse(dayStartIso(shiftDay(day, -6)), dayStartIso(shiftDay(day, 1))),
+    responseEnd,
+    7,
+  );
 
   if (!config.LLM_API_KEY.trim()) return base;
 

@@ -1,3 +1,4 @@
+import { formatDuration, OVERDUE_HOURS, type ResponseStats } from "../response.js";
 import type { Topic } from "../db.js";
 import { riskLabel, shiftDay, splitRisk, type Brief, type DayCount, type DigestPost } from "../digest.js";
 import { uiIcon } from "../icons.js";
@@ -214,6 +215,7 @@ export function briefPage(
           <h3>Cảm xúc trong ngày</h3>
           ${sentimentBar}
         </div>
+        ${responseCard(brief.response)}
         <div class="brief-col heroui-card">
           <h3>Theo nguồn theo dõi</h3>
           ${topics ? `<ul class="topic-split">${topics}</ul>` : `<p class="text-muted">Không có dữ liệu.</p>`}
@@ -311,4 +313,31 @@ export function comparePage(model: { topics: Topic[]; left: string; right: strin
     `,
     "compare",
   );
+}
+
+export function responseCard(stats: ResponseStats | undefined): string {
+  if (!stats) return "";
+  if (stats.negative === 0) {
+    return `<div class="brief-col heroui-card response-card"><h3>Xử lý bài tiêu cực</h3><p class="text-muted">Không có bài tiêu cực nào trong ${stats.days} ngày.</p></div>`;
+  }
+  const rate = Math.round((stats.done / stats.negative) * 100);
+  const people = stats.byAssignee
+    .slice(0, 6)
+    .map(
+      (p) =>
+        `<li><span>${escapeHtml(p.name)}</span><strong>${p.done}/${p.done + p.open}</strong><small class="text-muted">${p.done ? `TV ${escapeHtml(formatDuration(p.medianMinutes))}` : "chưa xong bài nào"}</small></li>`,
+    )
+    .join("");
+  return `
+        <div class="brief-col heroui-card response-card">
+          <h3>Xử lý bài tiêu cực <small class="text-muted">${stats.days} ngày</small></h3>
+          <div class="response-kpis">
+            <div><span class="kpi-label">Đã xong</span><strong>${stats.done}/${stats.negative}</strong><small class="text-muted">${rate}%</small></div>
+            <div><span class="kpi-label">Thời gian trung vị</span><strong>${escapeHtml(formatDuration(stats.medianMinutes))}</strong><small class="text-muted">90%: ${escapeHtml(formatDuration(stats.p90Minutes))}</small></div>
+            <div><span class="kpi-label">Còn mở</span><strong class="${stats.overdue ? "text-danger" : ""}">${stats.open}</strong><small class="${stats.overdue ? "text-danger" : "text-muted"}">${stats.overdue ? `${stats.overdue} chờ quá ${OVERDUE_HOURS} giờ` : "không bài nào quá hạn"}</small></div>
+          </div>
+          <ul class="topic-split">${people}</ul>
+          <small class="text-muted">Tính từ lúc hệ thống thấy bài đến lúc bấm Đã xong. TV: trung vị.</small>
+          ${stats.open ? `<a class="heroui-link" href="/?view=new&amp;sentiment=negative">Mở các bài tiêu cực chưa đọc →</a>` : ""}
+        </div>`;
 }

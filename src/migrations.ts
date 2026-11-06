@@ -117,6 +117,15 @@ export const MIGRATIONS: Migration[] = [
       db.exec("CREATE INDEX IF NOT EXISTS mentions_sentiment_source ON mentions(sentiment_source, created_at)");
     },
   },
+  {
+    version: 4,
+    name: "nháp câu trả lời và mốc thời gian xử lý bài",
+    up: (db) => {
+      ensureColumn(db, "mentions", "reply_draft", "reply_draft TEXT NOT NULL DEFAULT ''");
+      ensureColumn(db, "mentions", "reading_at", "reading_at TEXT");
+      ensureColumn(db, "mentions", "done_at", "done_at TEXT");
+    },
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

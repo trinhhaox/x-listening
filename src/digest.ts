@@ -1,3 +1,4 @@
+import { responseSummary, type ResponseStats } from "./response.js";
 export const ZONE = "Asia/Ho_Chi_Minh";
 
 export type DigestPost = {
@@ -43,6 +44,8 @@ export type Brief = {
   ai?: BriefAiMeta;
   /** Các bài AI dẫn chứng bằng [#n]. */
   aiRefs?: BriefRef[];
+  /** Tốc độ xử lý bài tiêu cực 7 ngày tính đến hết ngày này. */
+  response?: ResponseStats;
 };
 
 export type BriefRef = { n: number; author: string; topic: string; sentiment: string; text: string; url: string };
@@ -154,6 +157,7 @@ export function briefMarkdown(brief: Brief): string {
     "",
     `${brief.posts} bài. ${brief.negative.length} nghiêng xấu. ${brief.newAuthors.length} người viết lần đầu. ${brief.starred.length} bài đang ghim.`,
     ...(brief.previous ? [`Hôm trước: ${brief.previous.posts} bài, ${brief.previous.negative} nghiêng xấu. Trung bình 7 ngày: ${brief.previous.avg7} bài/ngày.`] : []),
+    ...(responseSummary(brief.response) ? [responseSummary(brief.response) + "."] : []),
     "",
     ...(brief.aiSummary ? ["## Nhận định AI", "", brief.aiSummary, ""] : []),
     "## Nghiêng xấu",

@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import { randomUUID } from "node:crypto";
-import { classifyMentionRuleBased, classifyMentionWithAi } from "../ai.js";
+import { classifyMentionRuleBased, classifyMentionWithAi, draftReplyWithAi, fillTemplate } from "../ai.js";
 import { muteKey } from "../db.js";
 import { pageKey } from "../facebook.js";
 import { threadsUserKey } from "../threads.js";
@@ -291,6 +291,58 @@ export function registerActionsRoutes(app: Hono, ctx: AppContext): void {
 
     const back = await backFrom(c);
     return c.redirect(deskPath(back.topic, back.view, undefined, back));
+  });
+
+  app.post("/mentions/:topicId/:mentionId/reply", async (c) => {
+    const topicId = c.req.param("topicId");
+    const mentionId = c.req.param("mentionId");
+    const body = await c.req.parseBody();
+    const back = await backFrom(c);
+    const go = (notice?: string) => c.redirect(deskPath(back.topic, back.view, notice, back) + `#reply-${topicId}-${mentionId}`);
+    const mention = safeKey(topicId) && safeKey(mentionId) ? store.getMention(topicId, mentionId) : null;
+    if (!mention) return go("Không tìm thấy bài.");
+
+    const op = String(body.op ?? "save");
+    let draft = String(body.reply_draft ?? "");
+    let notice: string | undefined;
+    if (op === "ai") {
+      const activeConfig = getRuntimeConfig(config, store);
+      const templates = store.listTemplates();
+      const topic = store.listTopics().find((t) => t.id === topicId);
+      if (!activeConfig.LLM_API_KEY.trim()) {
+        if (templates[0]) {
+          draft = fillTemplate(templates[0].content, mention.author_name);
+          notice = `Chưa có khóa AI nên đã chèn mẫu “${templates[0].name}”.`;
+        } else {
+          return go("Chưa có khóa AI và chưa có mẫu câu. Thêm khóa AI trong Cài đặt hoặc thêm mẫu câu phản hồi.");
+        }
+      } else {
+        try {
+          draft = await draftReplyWithAi(
+            {
+              topicName: topic?.name ?? "",
+              authorName: mention.author_name,
+              text: mention.text,
+              sentiment: mention.sentiment,
+              templates,
+              previous: draft,
+            },
+            { apiKey: activeConfig.LLM_API_KEY, baseUrl: activeConfig.LLM_BASE_URL, model: activeConfig.LLM_MODEL },
+          );
+          notice = "AI đã viết nháp. Đọc lại, sửa nếu cần rồi sao chép để trả lời.";
+        } catch (error: unknown) {
+          return go(`AI chưa viết được: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    }
+    store.setReplyDraft(topicId, mentionId, draft);
+    if (op === "done") {
+      store.setMentionQueue(topicId, mentionId, "done");
+      notice = "Đã lưu câu trả lời và chuyển bài sang Đã xong.";
+    } else if (op === "save") {
+      notice = draft.trim() ? "Đã lưu nháp." : "Đã xóa nháp.";
+    }
+    return go(notice);
   });
 
   app.post("/templates", async (c) => {

@@ -1,3 +1,4 @@
+import { fillTemplate } from "../ai.js";
 import type { AlertHitRow, AlertRule, MentionRow, MentionView, ResponseTemplate, Topic, Voice } from "../db.js";
 import type { WordCloudItem, TopicCluster } from "../cloud.js";
 import { uiIcon } from "../icons.js";
@@ -763,7 +764,7 @@ export function renderMentionCard(
   const sentimentChip = `<span class="heroui-chip ${chipClass}" title="${escapeHtml(sentimentTitle)}"><i class="heroui-dot"></i> ${chipLabel}${sourceMark}</span>`;
 
   return `
-  <article class="deck-mention-card heroui-card ${isCritical ? "is-critical" : ""} ${mention.starred ? "starred" : ""}" style="animation-delay:${Math.min(index * 30, 300)}ms">
+  <article id="m-${escapeHtml(mention.topic_id)}-${escapeHtml(mention.id)}" class="deck-mention-card heroui-card ${isCritical ? "is-critical" : ""} ${mention.starred ? "starred" : ""}" style="animation-delay:${Math.min(index * 30, 300)}ms">
     <div class="card-top-row">
       <div class="author-info">
         <span class="avatar-letter">${escapeHtml((mention.author_name || "A").slice(0, 1).toUpperCase())}</span>
@@ -847,5 +848,30 @@ export function renderMentionCard(
         <button class="btn btn-xs btn-outline" type="submit">Lưu ghi chú</button>
       </form>
     </details>
+    ${replyBox(mention, action, backFields, templates)}
   </article>`;
+}
+
+function replyBox(mention: MentionRow, action: string, backFields: string, templates: ResponseTemplate[]): string {
+  const draft = mention.reply_draft ?? "";
+  const options = templates
+    .map((tpl) => `<option value="${escapeHtml(fillTemplate(tpl.content, mention.author_name))}">${escapeHtml(tpl.name)}</option>`)
+    .join("");
+  const picker = templates.length
+    ? `<select class="heroui-select heroui-select-sm" title="Chèn một mẫu câu vào ô soạn" onchange="if(this.value){this.form.reply_draft.value=this.value;this.selectedIndex=0}"><option value="">Chèn mẫu câu…</option>${options}</select>`
+    : "";
+  return `
+    <details class="card-reply" id="reply-${escapeHtml(mention.topic_id)}-${escapeHtml(mention.id)}"${draft ? " open" : ""}>
+      <summary>${uiIcon("message", 12)} Soạn câu trả lời${draft ? ` <span class="draft-mark">có nháp</span>` : ""}</summary>
+      <form class="reply-form" method="post" action="${action}/reply">${backFields}
+        <textarea class="heroui-input reply-text" name="reply_draft" rows="3" maxlength="2000" placeholder="Viết câu trả lời, chèn mẫu câu, hoặc bấm “AI viết nháp”. Có sẵn nháp thì AI sẽ viết lại cho tốt hơn.">${escapeHtml(draft)}</textarea>
+        <div class="reply-actions">
+          ${picker}
+          <button class="btn btn-xs btn-outline btn-ai-tag" type="submit" name="op" value="ai" title="AI viết nháp theo nội dung bài và giọng của các mẫu câu">${uiIcon("zap", 12)} AI viết nháp</button>
+          <button class="btn btn-xs btn-outline" type="submit" name="op" value="save">Lưu nháp</button>
+          <button class="btn btn-xs btn-outline" type="button" onclick="navigator.clipboard.writeText(this.form.reply_draft.value).then(()=>{this.textContent='Đã chép ✓'})">Sao chép</button>
+          <button class="btn btn-xs btn-primary" type="submit" name="op" value="done" title="Lưu nháp và chuyển bài sang Đã xong">Lưu & Đã xong</button>
+        </div>
+      </form>
+    </details>`;
 }

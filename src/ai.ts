@@ -421,3 +421,72 @@ export async function classifySentimentBatch(items: SentimentBatchItem[], option
   );
   return parseSentimentBatch(raw, items);
 }
+
+export type ReplyDraftInput = {
+  /** Tên nguồn theo dõi, thường là tên thương hiệu. */
+  topicName: string;
+  authorName: string;
+  text: string;
+  sentiment: string;
+  templates: { name: string; content: string }[];
+  /** Nháp cũ người trực muốn AI viết lại. */
+  previous?: string;
+};
+
+export const REPLY_SYSTEM_PROMPT = `Bạn là nhân viên chăm sóc khách hàng của thương hiệu, viết câu trả lời công khai dưới một bài mạng xã hội.
+Quy tắc:
+- Viết bằng ngôn ngữ của bài gốc (thường là tiếng Việt), xưng "chúng mình" hoặc "[thương hiệu]", gọi người viết lịch sự (anh/chị, bạn).
+- Ngắn: 2 đến 4 câu, không quá 70 từ. Không dùng hashtag, không dùng Markdown.
+- Bài phàn nàn: cảm ơn, xin lỗi về trải nghiệm, nói rõ bước tiếp theo (mời nhắn tin riêng kèm mã đơn hoặc số điện thoại). Không đổ lỗi, không tranh cãi.
+- Bài khen: cảm ơn chân thành, nhắc lại đúng điều họ khen.
+- Không bịa chính sách, giá, thời hạn hay khoản đền bù. Chỉ dùng thông tin có trong mẫu câu nếu được cung cấp.
+- Nếu có mẫu câu, giữ giọng văn và thông tin liên hệ giống mẫu.
+Chỉ trả về đúng nội dung câu trả lời, không giải thích.`;
+
+export function buildReplyPrompt(input: ReplyDraftInput): string {
+  const templates = input.templates
+    .slice(0, 5)
+    .map((t, i) => `${i + 1}. ${t.name}: ${t.content.slice(0, 400)}`)
+    .join("\n");
+  const sentiment = input.sentiment === "negative" ? "tiêu cực" : input.sentiment === "positive" ? "tích cực" : "trung tính";
+  return [
+    `Thương hiệu: ${input.topicName}`,
+    `Người viết: ${input.authorName || "khách hàng"}`,
+    `Cảm xúc của bài: ${sentiment}`,
+    `Bài gốc:\n"""\n${input.text.slice(0, 1500)}\n"""`,
+    templates ? `Mẫu câu của đội (giữ giọng và thông tin liên hệ):\n${templates}` : "",
+    input.previous?.trim() ? `Nháp hiện tại (viết lại cho tốt hơn, giữ ý chính):\n${input.previous.trim().slice(0, 800)}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/** Bỏ ngoặc kép bao ngoài và tiền tố kiểu "Câu trả lời:". */
+export function cleanReply(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^(câu trả lời|trả lời|reply)\s*:\s*/i, "")
+    .replace(/^["“”']+|["“”']+$/g, "")
+    .trim()
+    .slice(0, 2000);
+}
+
+export async function draftReplyWithAi(input: ReplyDraftInput, options: AiOptions): Promise<string> {
+  const raw = await callChatCompletions(
+    [
+      { role: "system", content: REPLY_SYSTEM_PROMPT },
+      { role: "user", content: buildReplyPrompt(input) },
+    ],
+    options,
+    false,
+    { maxTokens: 1200, timeoutMs: 60_000 },
+  );
+  const text = cleanReply(raw);
+  if (!text) throw new Error("AI không trả về câu trả lời");
+  return text;
+}
+
+/** Không có AI: lấy mẫu đầu tiên hợp cảm xúc, thay {tên} bằng tên người viết. */
+export function fillTemplate(template: string, authorName: string): string {
+  return template.replace(/\{\s*(tên|ten|name)\s*\}/gi, authorName || "bạn").trim();
+}

@@ -1,3 +1,4 @@
+import { responseSummary, type ResponseStats } from "./response.js";
 import { execFile } from "node:child_process";
 import { riskLabel, splitRisk } from "./digest.js";
 import { markdownToPlain } from "./views/markdown.js";
@@ -188,6 +189,7 @@ export type ExecutiveReportData = {
   aiSummary?: string;
   /** Tiêu đề thay cho "Báo cáo Dư luận Điều hành ngày …", ví dụ cho báo cáo tự động. */
   title?: string;
+  response?: ResponseStats;
 };
 
 export async function deliverExecutiveReport(
@@ -210,7 +212,8 @@ export async function deliverExecutiveReport(
   const starCount = brief.starredCount ?? brief.starred?.length ?? 0;
 
   const dayFormatted = brief.day.split("-").reverse().join("/");
-  const statsSummary = `${brief.posts} bài · ${negCount} nghiêng xấu · ${newAuthCount} người mới · ${starCount} ghim`;
+  const handled = responseSummary(brief.response);
+  const statsSummary = `${brief.posts} bài · ${negCount} nghiêng xấu · ${newAuthCount} người mới · ${starCount} ghim${handled ? `\n⏱ ${handled}` : ""}`;
   const url = target.toLowerCase();
 
   // Tách dòng "MỨC RỦI RO" khỏi thân nhận định để đưa lên đầu tin.

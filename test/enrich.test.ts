@@ -136,7 +136,7 @@ test("thẻ bài ghi rõ nhãn do AI hay người sửa", () => {
     id: "m1", topic_id: "t1", topic_name: "Rươi Co", text: "x", author_username: "a", author_name: "A", created_at: new Date().toISOString(),
     lang: "vi", like_count: 0, repost_count: 0, reply_count: 0, quote_count: 0, url: "", sentiment: "negative", sentiment_score: -2,
     sample: 0, fetched_at: "", starred: 0, hidden: 0, note: "", queue: "new", assigned_to: "", tag: "",
-    sentiment_source: "ai", sentiment_reason: "mỉa mai",
+    sentiment_source: "ai", sentiment_reason: "mỉa mai", reply_draft: "", reading_at: null, done_at: null,
   } satisfies MentionRow;
   const html = renderMentionCard(row, 0, "", [], true);
   assert.match(html, /title="AI chấm: mỉa mai"/);
