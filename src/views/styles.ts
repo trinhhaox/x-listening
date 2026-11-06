@@ -1010,6 +1010,23 @@ export const STYLES = `    :root {
       display: flex;
       flex-direction: column;
       gap: 12px;
+      max-height: calc(100vh - 230px);
+      min-height: 220px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding-right: 6px;
+      margin-right: -6px;
+      scrollbar-width: thin;
+    }
+    .deck-dual-streams { align-items: start; }
+    .deck-dual-streams.has-empty .stream-cards-list { min-height: 0; }
+    .stream-more { display: flex; flex-direction: column; gap: 12px; }
+    .stream-more > summary { list-style: none; align-self: center; cursor: pointer; margin: 4px auto; }
+    .stream-more > summary::-webkit-details-marker { display: none; }
+    .stream-more[open] > summary { display: none; }
+    .stream-more-list { display: flex; flex-direction: column; gap: 12px; }
+    @media (max-width: 960px) {
+      .stream-cards-list { max-height: 75vh; }
     }
     .stream-empty {
       padding: 40px 16px;

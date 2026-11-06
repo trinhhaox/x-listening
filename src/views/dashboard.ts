@@ -79,8 +79,21 @@ export function dashboardPage(model: DashboardModel): string {
   const renderCard = (mention: MentionRow, idx: number, isCritical: boolean) =>
     renderMentionCard(mention, idx, backFields, model.templates, isCritical);
 
-  const criticalCards = criticalMentions.map((m, i) => renderCard(m, i, true)).join("");
-  const naturalCards = naturalMentions.map((m, i) => renderCard(m, i, false)).join("");
+  // Mỗi luồng chỉ hiện sẵn STREAM_PREVIEW bài, phần còn lại gói trong "Xem thêm" để trang không dài vô tận.
+  const STREAM_PREVIEW = 12;
+  const renderStream = (list: MentionRow[], isCritical: boolean) => {
+    if (!list.length) return "";
+    const head = list.slice(0, STREAM_PREVIEW).map((m, i) => renderCard(m, i, isCritical)).join("");
+    const rest = list.slice(STREAM_PREVIEW);
+    if (!rest.length) return head;
+    return `${head}
+      <details class="stream-more">
+        <summary class="btn btn-outline btn-sm">Xem thêm ${rest.length} bài</summary>
+        <div class="stream-more-list">${rest.map((m) => renderCard(m, 0, isCritical)).join("")}</div>
+      </details>`;
+  };
+  const criticalCards = renderStream(criticalMentions, true);
+  const naturalCards = renderStream(naturalMentions, false);
 
   const hits = model.hits
     .map(
@@ -423,7 +436,7 @@ export function dashboardPage(model: DashboardModel): string {
     </section>
 
     <!-- KHU VỰC 3: DUAL-STREAM PROCESSING (NỬA DƯỚI - CHIA 2 LUỒNG XỬ LÝ) -->
-    <section class="deck-dual-streams">
+    <section class="deck-dual-streams ${!criticalMentions.length || !naturalMentions.length ? "has-empty" : ""}">
       <!-- CỘT TRÁI: LUỒNG NGUY CƠ CAO (CẦN CAN THIỆP GẤP) -->
       <div class="stream-column stream-critical heroui-card">
         <div class="stream-header critical-head">
