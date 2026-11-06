@@ -5,6 +5,8 @@ import { escapeHtml, queueButton, formatWhen, layout } from "./layout.js";
 
 type DashboardModel = {
   topics: Topic[];
+  /** Nguồn đang bật mà lỗi liên tiếp nhiều lượt. */
+  failing?: { name: string; source: string; error: string; count: number }[];
   mentions: MentionRow[];
   templates: ResponseTemplate[];
   activeTopic: string;
@@ -272,6 +274,11 @@ export function dashboardPage(model: DashboardModel): string {
     </div>
 
     ${model.notice ? `<div class="deck-alert info">${uiIcon("info")} ${escapeHtml(model.notice)}</div>` : ""}
+    ${model.failing?.length
+      ? `<div class="deck-alert error">${uiIcon("alert")}<div class="alert-lines"><span><strong>${model.failing.length} nguồn đang không quét được.</strong> Bài mới từ các nguồn này đang bị bỏ lỡ. Thường do cookie hoặc token hết hạn: vào <a href="/settings">Cài đặt</a> để cập nhật.</span>${model.failing
+          .map((f) => `<span>• ${escapeHtml(f.name)} (${escapeHtml(f.source)}), lỗi ${f.count} lượt liền: ${escapeHtml(f.error.slice(0, 180))}</span>`)
+          .join("")}</div></div>`
+      : ""}
     ${model.spike ? `<div class="deck-alert warning">${uiIcon("zap")} <strong>Đột biến phát hiện:</strong> ${escapeHtml(model.spike)}</div>` : ""}
     ${(() => {
       const items = [
@@ -713,7 +720,7 @@ function renderWordCloudSection(
   </section>`;
 }
 
-function renderMentionCard(
+export function renderMentionCard(
   mention: MentionRow,
   index: number,
   backFields: string,
@@ -743,12 +750,17 @@ function renderMentionCard(
     ? `<span class="heroui-chip heroui-chip-bordered">${uiIcon("user", 12)} ${escapeHtml(mention.assigned_to)}</span>`
     : "";
 
-  const sentimentChip =
-    mention.sentiment === "positive"
-      ? `<span class="heroui-chip heroui-chip-success"><i class="heroui-dot"></i> Tích cực</span>`
-      : mention.sentiment === "negative"
-        ? `<span class="heroui-chip heroui-chip-danger"><i class="heroui-dot"></i> Tiêu cực</span>`
-        : `<span class="heroui-chip heroui-chip-default"><i class="heroui-dot"></i> Trung tính</span>`;
+  const source = mention.sentiment_source ?? "lexicon";
+  const sentimentTitle =
+    source === "ai"
+      ? `AI chấm${mention.sentiment_reason ? `: ${mention.sentiment_reason}` : ""}`
+      : source === "manual"
+        ? "Người vận hành đã sửa tay"
+        : "Đếm theo từ vựng, chưa được AI xem";
+  const sourceMark = source === "ai" ? `<small class="sent-src">AI</small>` : source === "manual" ? `<small class="sent-src">sửa tay</small>` : "";
+  const chipClass = mention.sentiment === "positive" ? "heroui-chip-success" : mention.sentiment === "negative" ? "heroui-chip-danger" : "heroui-chip-default";
+  const chipLabel = mention.sentiment === "positive" ? "Tích cực" : mention.sentiment === "negative" ? "Tiêu cực" : "Trung tính";
+  const sentimentChip = `<span class="heroui-chip ${chipClass}" title="${escapeHtml(sentimentTitle)}"><i class="heroui-dot"></i> ${chipLabel}${sourceMark}</span>`;
 
   return `
   <article class="deck-mention-card heroui-card ${isCritical ? "is-critical" : ""} ${mention.starred ? "starred" : ""}" style="animation-delay:${Math.min(index * 30, 300)}ms">
@@ -801,6 +813,14 @@ function renderMentionCard(
       <div class="inline-forms">
         <form class="inline-form" method="post" action="${action}/auto-classify">${backFields}
           <button class="btn btn-xs btn-outline btn-ai-tag" type="submit" title="AI tự động phân loại nhãn và gán người xử lý cho riêng bài này">${uiIcon("zap", 12)} AI Gán</button>
+        </form>
+
+        <form class="inline-form" method="post" action="${action}/sentiment">${backFields}
+          <select class="heroui-select heroui-select-sm" name="sentiment" onchange="this.form.submit()" title="Sửa cảm xúc nếu máy chấm sai">
+            <option value="positive"${mention.sentiment === "positive" ? " selected" : ""}>Tích cực</option>
+            <option value="neutral"${mention.sentiment === "neutral" ? " selected" : ""}>Trung tính</option>
+            <option value="negative"${mention.sentiment === "negative" ? " selected" : ""}>Tiêu cực</option>
+          </select>
         </form>
 
         <form class="inline-form" method="post" action="${action}/tag">${backFields}

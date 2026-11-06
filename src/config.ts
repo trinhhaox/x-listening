@@ -22,6 +22,8 @@ const schema = z.object({
   DESKTOP_NOTIFY: z.enum(["0", "1"]).optional().default("1"),
   // Giờ gửi bản tin tự động (HH:MM giờ Việt Nam); trống là tắt.
   DAILY_REPORT_TIME: z.string().optional().default(""),
+  /** "0" tắt AI chấm cảm xúc bài mới; mặc định bật khi có LLM_API_KEY. */
+  AI_SENTIMENT: z.enum(["0", "1"]).optional(),
   // Số ngày giữ bài; 0 là giữ mãi. Tối thiểu 7 ngày khi bật.
   RETENTION_DAYS: z.coerce.number().int().min(0).max(3650).default(0),
   LLM_API_KEY: z.string().optional().default(""),

@@ -359,3 +359,67 @@ Trả về DUY NHẤT một chuỗi JSON chuẩn có cấu trúc:
 }
 
 
+
+export type SentimentBatchItem = { id: string; topicId: string; topicName?: string; text: string };
+export type SentimentVerdict = { id: string; topicId: string; sentiment: "positive" | "negative" | "neutral"; reason: string };
+
+export const SENTIMENT_BATCH_SIZE = 25;
+
+export const SENTIMENT_SYSTEM_PROMPT = `Bạn chấm cảm xúc bài mạng xã hội (tiếng Việt và tiếng Anh) cho đội theo dõi dư luận của một thương hiệu.
+Mỗi bài có [chủ đề] là thương hiệu hoặc vấn đề đang theo dõi. Chấm thái độ của người viết với chủ đề đó:
+- negative: phàn nàn, chê, tố cáo, thất vọng, cảnh báo người khác, mỉa mai, đòi hoàn tiền, có nguy cơ thành khủng hoảng.
+- positive: khen, giới thiệu tốt, cảm ơn, hài lòng, muốn mua lại.
+- neutral: hỏi thông tin, tin tức thuần túy, quảng cáo hoặc bài do chính thương hiệu đăng, không rõ thái độ.
+Chú ý câu mỉa mai ("ngon quá cơ, đợi 2 tiếng"), phủ định ("không tệ"), tiếng lóng và viết tắt.
+Trả về DUY NHẤT một mảng JSON, mỗi bài một phần tử, theo đúng số thứ tự:
+[{"n":1,"s":"negative","r":"lý do ngắn dưới 12 từ"}]`;
+
+export function buildSentimentBatchPrompt(items: SentimentBatchItem[]): string {
+  return items
+    .map((item, i) => `${i + 1}. [${(item.topicName ?? "").slice(0, 40) || "chung"}] ${item.text.replace(/\s+/g, " ").trim().slice(0, 500)}`)
+    .join("\n");
+}
+
+/** Đọc mảng JSON từ câu trả lời (có thể bọc trong ```json). Phần tử hỏng thì bỏ qua. */
+export function parseSentimentBatch(raw: string, items: SentimentBatchItem[]): SentimentVerdict[] {
+  const start = raw.indexOf("[");
+  const end = raw.lastIndexOf("]");
+  if (start < 0 || end <= start) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw.slice(start, end + 1));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const out: SentimentVerdict[] = [];
+  const seen = new Set<number>();
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as { n?: unknown; s?: unknown; r?: unknown };
+    const n = Number(e.n);
+    const item = Number.isInteger(n) ? items[n - 1] : undefined;
+    if (!item || seen.has(n)) continue;
+    const s = String(e.s ?? "").toLowerCase().trim();
+    const sentiment = s.startsWith("neg") ? "negative" : s.startsWith("pos") ? "positive" : s.startsWith("neu") ? "neutral" : null;
+    if (!sentiment) continue;
+    seen.add(n);
+    out.push({ id: item.id, topicId: item.topicId, sentiment, reason: String(e.r ?? "").trim().slice(0, 160) });
+  }
+  return out;
+}
+
+/** Chấm cảm xúc một lô bài bằng một lần gọi AI. Lỗi thì ném ra để người gọi ghi lại. */
+export async function classifySentimentBatch(items: SentimentBatchItem[], options: AiOptions): Promise<SentimentVerdict[]> {
+  if (items.length === 0) return [];
+  const raw = await callChatCompletions(
+    [
+      { role: "system", content: SENTIMENT_SYSTEM_PROMPT },
+      { role: "user", content: buildSentimentBatchPrompt(items) },
+    ],
+    options,
+    false,
+    { maxTokens: 60 + items.length * 40, timeoutMs: 60_000 },
+  );
+  return parseSentimentBatch(raw, items);
+}

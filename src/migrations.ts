@@ -106,6 +106,17 @@ export const MIGRATIONS: Migration[] = [
       db.exec("CREATE INDEX IF NOT EXISTS mentions_topic_url ON mentions(topic_id, url)");
     },
   },
+  {
+    version: 3,
+    name: "nguồn chấm cảm xúc (từ vựng/AI/sửa tay) và sức khỏe tần số",
+    up: (db) => {
+      ensureColumn(db, "mentions", "sentiment_source", "sentiment_source TEXT NOT NULL DEFAULT 'lexicon'");
+      ensureColumn(db, "mentions", "sentiment_reason", "sentiment_reason TEXT NOT NULL DEFAULT ''");
+      ensureColumn(db, "topics", "fail_count", "fail_count INTEGER NOT NULL DEFAULT 0");
+      ensureColumn(db, "topics", "health_alerted", "health_alerted INTEGER NOT NULL DEFAULT 0");
+      db.exec("CREATE INDEX IF NOT EXISTS mentions_sentiment_source ON mentions(sentiment_source, created_at)");
+    },
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

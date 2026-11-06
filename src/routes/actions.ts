@@ -235,6 +235,21 @@ export function registerActionsRoutes(app: Hono, ctx: AppContext): void {
     return c.redirect(deskPath(back.topic, back.view, undefined, back));
   });
 
+  app.post("/mentions/:topicId/:mentionId/sentiment", async (c) => {
+    const topicId = c.req.param("topicId");
+    const mentionId = c.req.param("mentionId");
+    const body = await c.req.parseBody();
+    const value = String(body.sentiment ?? "");
+    const back = await backFrom(c);
+    if (safeKey(topicId) && safeKey(mentionId) && (value === "positive" || value === "neutral" || value === "negative")) {
+      store.applySentiment(topicId, mentionId, { sentiment: value, source: "manual" });
+      await fanOutHits();
+      const label = value === "positive" ? "Tích cực" : value === "negative" ? "Tiêu cực" : "Trung tính";
+      return c.redirect(deskPath(back.topic, back.view, `Đã sửa cảm xúc thành “${label}”. AI sẽ không chấm đè bài này.`, back));
+    }
+    return c.redirect(deskPath(back.topic, back.view, undefined, back));
+  });
+
   app.post("/mentions/auto-classify", async (c) => {
     const body = await c.req.parseBody();
     const topic = String(body.topic ?? "").trim();

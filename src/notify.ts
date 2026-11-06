@@ -130,6 +130,37 @@ export async function deliverHit(
   return null;
 }
 
+/** Gửi một tin chữ (báo nguồn lỗi, nguồn chạy lại...) qua cùng webhook với chuông. */
+export async function deliverText(
+  title: string,
+  body: string,
+  options: { webhookUrl: string; desktop?: boolean; fetchImpl?: typeof fetch; desktopImpl?: (title: string, body: string) => void },
+): Promise<string | null> {
+  if (options.desktop) (options.desktopImpl ?? desktopNotify)(clip(title, 60), clip(body, 180));
+  const raw = options.webhookUrl.trim();
+  if (!raw) return null;
+  const target = webhookTarget(raw);
+  if (!target) return "Webhook chỉ nhận địa chỉ https, hoặc http trên máy này.";
+  const url = target.toLowerCase();
+  const chatId = telegramChatId(target);
+  const payload = chatId
+    ? telegramPayload(chatId, `${title}\n${body}`)
+    : url.includes("discord.com/api/webhooks")
+      ? { content: `**${clip(title, 200)}**\n${clipBlock(body, 1800)}` }
+      : url.includes("hooks.slack.com")
+        ? { text: `*${clip(title, 200)}*\n${clipBlock(body, 2900)}` }
+        : { title: clip(title, 200), message: clipBlock(body, 2000) };
+  const response = await (options.fetchImpl ?? fetch)(target, {
+    method: "POST",
+    redirect: "error",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(4000),
+  });
+  if (!response.ok) return `Webhook trả về ${response.status}.`;
+  return null;
+}
+
 function desktopNotify(title: string, body: string): void {
   if (process.platform !== "darwin") return;
   execFile("osascript", ["-e", `display notification ${JSON.stringify(body)} with title ${JSON.stringify(title)}`], { timeout: 3000 }, () => {});

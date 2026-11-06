@@ -437,6 +437,17 @@ export const STYLES = `    :root {
       border: 1px solid var(--heroui-danger-100);
     }
 
+    .sent-src {
+      margin-left: 4px;
+      padding: 0 4px;
+      border-radius: 4px;
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      background: rgba(255, 255, 255, 0.55);
+      opacity: 0.85;
+    }
+
     /* EXECUTIVE RADAR GRID */
     .executive-radar {
       display: grid;

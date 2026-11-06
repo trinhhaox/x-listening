@@ -6,6 +6,7 @@ import type { AppConfig } from "./config.js";
 import { Store } from "./db.js";
 import { listenOnce, type ListenReport } from "./listen.js";
 import { deliverHit } from "./notify.js";
+import { aiSentimentEnabled, checkSourceHealth, runAiSentiment } from "./enrich.js";
 import { searchLiveMentions } from "./social_search.js";
 import { LiveSearchCache } from "./search_cache.js";
 import { getRuntimeConfig } from "./runtime_config.js";
@@ -42,7 +43,11 @@ export function createApp(config: AppConfig, store: Store) {
         onlyTopicId: extra?.onlyTopicId,
         startTime: extra?.startTime,
       });
+      // AI chấm cảm xúc trước khi gửi chuông, để chuông “nghiêng xấu” dựa trên kết quả AI.
+      const latest = getRuntimeConfig(config, store);
+      if (aiSentimentEnabled(latest)) await runAiSentiment(store, latest).catch(() => undefined);
       await fanOutHits();
+      await checkSourceHealth(store, latest).catch(() => undefined);
       return report;
     } finally {
       listening = false;

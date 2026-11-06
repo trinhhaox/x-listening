@@ -11,6 +11,7 @@ import { briefForDay, outboundLabel, readView } from "../http/helpers.js";
 import { aiBriefCard } from "../views/brief.js";
 import { getRuntimeConfig } from "../runtime_config.js";
 import { lastReportResult, normalizeReportTime } from "../daily.js";
+import { aiSentimentEnabled, failingTopics, readAiSentimentStatus, runAiSentiment, sourceName } from "../enrich.js";
 import type { AppContext } from "../http/context.js";
 
 /** Các trang HTML: tổng quan, cấu hình, báo cáo, so sánh, xuất CSV, xu hướng, tra cứu. */
@@ -37,6 +38,7 @@ export function registerPagesRoutes(app: Hono, ctx: AppContext): void {
     return c.html(
       dashboardPage({
         topics: store.listTopics(),
+        failing: failingTopics(store).map((t) => ({ name: t.name, source: sourceName(t.source), error: t.last_error ?? "", count: t.fail_count })),
         mentions: store.listMentions({
           topicId: topic || undefined,
           limit: 80,
@@ -90,7 +92,22 @@ export function registerPagesRoutes(app: Hono, ctx: AppContext): void {
   app.get("/settings", (c) => {
     const activeConfig = getRuntimeConfig(config, store);
     const notice = c.req.query("notice") ?? "";
-    return c.html(settingsPage(activeConfig, notice, { unreadableSecrets: [...store.unreadableSecrets], xRoute: store.getXRoute(), lastReport: lastReportResult(store) }));
+    return c.html(settingsPage(activeConfig, notice, { unreadableSecrets: [...store.unreadableSecrets], xRoute: store.getXRoute(), lastReport: lastReportResult(store),
+      aiSentiment: { status: readAiSentimentStatus(store), pending: store.countMentionsForAiSentiment(new Date(Date.now() - 7 * 86_400_000).toISOString()) },
+    }));
+  });
+
+  app.post("/sentiment/ai-run", async (c) => {
+    const activeConfig = getRuntimeConfig(config, store);
+    if (!aiSentimentEnabled(activeConfig)) {
+      return c.redirect("/settings?notice=" + encodeURIComponent("Cần có khóa AI và bật “Dùng AI chấm cảm xúc” trước."));
+    }
+    const status = await runAiSentiment(store, activeConfig, { sinceDays: 7, limit: 100 });
+    await ctx.fanOutHits();
+    const msg = status.error
+      ? `AI chấm được ${status.scored} bài rồi dừng vì lỗi: ${status.error}`
+      : `AI đã chấm ${status.scored} bài, sửa nhãn cảm xúc ${status.changed} bài.`;
+    return c.redirect("/settings?notice=" + encodeURIComponent(msg));
   });
 
   app.post("/settings", async (c) => {
@@ -107,6 +124,7 @@ export function registerPagesRoutes(app: Hono, ctx: AppContext): void {
     }
 
     store.setSetting("DESKTOP_NOTIFY", body.DESKTOP_NOTIFY === "1" ? "1" : "0");
+    store.setSetting("AI_SENTIMENT", body.AI_SENTIMENT === "1" ? "1" : "0");
     if (body.LISTEN_INTERVAL_MINUTES) {
       store.setSetting("LISTEN_INTERVAL_MINUTES", String(body.LISTEN_INTERVAL_MINUTES));
     }

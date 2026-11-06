@@ -19,6 +19,7 @@ export function getRuntimeConfig(base: AppConfig, store: Store): AppConfig {
     DESKTOP_NOTIFY: dbSettings.DESKTOP_NOTIFY === "0" || dbSettings.DESKTOP_NOTIFY === "1" ? dbSettings.DESKTOP_NOTIFY : base.DESKTOP_NOTIFY,
     LISTEN_INTERVAL_MINUTES: Number(dbSettings.LISTEN_INTERVAL_MINUTES) || base.LISTEN_INTERVAL_MINUTES,
     DAILY_REPORT_TIME: dbSettings.DAILY_REPORT_TIME ?? base.DAILY_REPORT_TIME,
+    AI_SENTIMENT: dbSettings.AI_SENTIMENT === "0" || dbSettings.AI_SENTIMENT === "1" ? dbSettings.AI_SENTIMENT : base.AI_SENTIMENT,
     RETENTION_DAYS: dbSettings.RETENTION_DAYS !== undefined && dbSettings.RETENTION_DAYS !== "" ? Number(dbSettings.RETENTION_DAYS) || 0 : base.RETENTION_DAYS,
     SEARCH_MAX_RESULTS: Number(dbSettings.SEARCH_MAX_RESULTS) || base.SEARCH_MAX_RESULTS,
   };

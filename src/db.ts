@@ -24,6 +24,10 @@ export type Topic = {
   last_listened_at: string | null;
   last_error: string | null;
   created_at: string;
+  /** Số lượt quét lỗi liên tiếp; về 0 khi quét được. */
+  fail_count: number;
+  /** 1 khi đã báo “nguồn lỗi” ra webhook và chưa báo “đã chạy lại”. */
+  health_alerted: number;
 };
 
 export type Mention = {
@@ -49,7 +53,12 @@ export type Mention = {
   queue: QueueState;
   assigned_to: string;
   tag: string;
+  /** Ai chấm cảm xúc: lexicon (đếm từ), ai, manual (người sửa tay). */
+  sentiment_source: SentimentSource;
+  sentiment_reason: string;
 };
+
+export type SentimentSource = "lexicon" | "ai" | "manual";
 
 export type MentionView = "wire" | "new" | "reading" | "done" | "starred" | "hidden";
 export type QueueState = "new" | "reading" | "done";
@@ -206,8 +215,12 @@ export class Store {
 
   markTopicListened(id: string, sinceId: string | null, error: string | null, at: string): void {
     this.db
-      .prepare("UPDATE topics SET since_id = COALESCE(?, since_id), last_listened_at = ?, last_error = ? WHERE id = ?")
-      .run(sinceId, at, error, id);
+      .prepare(
+        `UPDATE topics SET since_id = COALESCE(?, since_id), last_listened_at = ?, last_error = ?,
+           fail_count = CASE WHEN ? IS NULL THEN 0 ELSE fail_count + 1 END
+         WHERE id = ?`,
+      )
+      .run(sinceId, at, error, error, id);
   }
 
   insertMention(mention: NewMention, fetchedAt: string): boolean {
@@ -239,8 +252,8 @@ export class Store {
            quote_count = excluded.quote_count,
            url = excluded.url,
            text = excluded.text,
-           sentiment = excluded.sentiment,
-           sentiment_score = excluded.sentiment_score`,
+           sentiment = CASE WHEN mentions.sentiment_source = 'lexicon' THEN excluded.sentiment ELSE mentions.sentiment END,
+           sentiment_score = CASE WHEN mentions.sentiment_source = 'lexicon' THEN excluded.sentiment_score ELSE mentions.sentiment_score END`,
       )
       .run(
         mention.id,
@@ -497,7 +510,10 @@ export class Store {
 
   private reclassifyMentions(): number {
     const bundle = this.lexiconBundle();
-    const rows = this.db.prepare("SELECT id, topic_id, text, sentiment, sentiment_score FROM mentions").all() as Array<{
+    // Bài đã được AI hoặc người chấm thì giữ nguyên, từ vựng mới không ghi đè.
+    const rows = this.db
+      .prepare("SELECT id, topic_id, text, sentiment, sentiment_score FROM mentions WHERE sentiment_source = 'lexicon'")
+      .all() as Array<{
       id: string;
       topic_id: string;
       text: string;
@@ -813,10 +829,84 @@ export class Store {
     return Number(result.changes);
   }
 
-  private recordHits(mention: NewMention, sentiment: string, at: string): void {
+  /** Bài chưa được AI/người chấm cảm xúc, mới nhất trước. Bỏ bài mẫu và bài đã giấu. */
+  listMentionsForAiSentiment(limit: number, sinceIso: string): Array<{ id: string; topic_id: string; text: string; sentiment: string }> {
+    return this.db
+      .prepare(
+        `SELECT id, topic_id, text, sentiment FROM mentions
+         WHERE sentiment_source = 'lexicon' AND sample = 0 AND hidden = 0 AND created_at >= ? AND length(trim(text)) > 0
+         ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(sinceIso, Math.max(1, Math.floor(limit))) as Array<{ id: string; topic_id: string; text: string; sentiment: string }>;
+  }
+
+  countMentionsForAiSentiment(sinceIso: string): number {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS n FROM mentions WHERE sentiment_source = 'lexicon' AND sample = 0 AND hidden = 0 AND created_at >= ?")
+      .get(sinceIso) as { n: number };
+    return Number(row.n) || 0;
+  }
+
+  /**
+   * Ghi cảm xúc do AI hoặc người chấm. Bài đã được người sửa tay thì AI không ghi đè.
+   * Khi bài chuyển sang tiêu cực, chạy lại chuông; khi bài thôi tiêu cực, gỡ hồi chuông
+   * “nghiêng xấu” chưa kịp gửi đi (báo động giả của bộ đếm từ).
+   */
+  applySentiment(
+    topicId: string,
+    mentionId: string,
+    value: { sentiment: Sentiment; reason?: string; source: "ai" | "manual" },
+    at = new Date().toISOString(),
+  ): boolean {
+    const row = this.db.prepare("SELECT * FROM mentions WHERE id = ? AND topic_id = ?").get(mentionId, topicId) as Mention | undefined;
+    if (!row) return false;
+    if (value.source === "ai" && row.sentiment_source === "manual") return false;
+    const score = value.sentiment === "positive" ? 2 : value.sentiment === "negative" ? -2 : 0;
+    this.db
+      .prepare("UPDATE mentions SET sentiment = ?, sentiment_score = ?, sentiment_source = ?, sentiment_reason = ? WHERE id = ? AND topic_id = ?")
+      .run(value.sentiment, score, value.source, (value.reason ?? "").slice(0, 200), mentionId, topicId);
+    if (row.sentiment === value.sentiment) return true;
+    if (row.sentiment === "negative") {
+      this.db
+        .prepare(
+          `DELETE FROM alert_hits WHERE mention_id = ? AND topic_id = ? AND notified = 0
+             AND alert_id IN (SELECT id FROM alerts WHERE kind IN ('negative', 'velocity'))`,
+        )
+        .run(mentionId, topicId);
+    }
+    if (value.sentiment === "negative" && row.hidden === 0) {
+      this.recordHits(
+        {
+          id: row.id,
+          topicId: row.topic_id,
+          text: row.text,
+          authorUsername: row.author_username,
+          authorName: row.author_name,
+          createdAt: row.created_at,
+          lang: row.lang,
+          likeCount: row.like_count,
+          repostCount: row.repost_count,
+          replyCount: row.reply_count,
+          quoteCount: row.quote_count,
+          url: row.url,
+        },
+        "negative",
+        at,
+        ["negative", "velocity"],
+      );
+    }
+    return true;
+  }
+
+  setTopicHealthAlerted(id: string, alerted: boolean): void {
+    this.db.prepare("UPDATE topics SET health_alerted = ? WHERE id = ?").run(alerted ? 1 : 0, id);
+  }
+
+  private recordHits(mention: NewMention, sentiment: string, at: string, onlyKinds?: string[]): void {
     for (const rule of this.listAlerts()) {
       if (rule.active !== 1) continue;
       if (rule.topic_id && rule.topic_id !== mention.topicId) continue;
+      if (onlyKinds && !onlyKinds.includes(rule.kind)) continue;
 
       if (rule.kind === "velocity") {
         if (sentiment === "negative") {

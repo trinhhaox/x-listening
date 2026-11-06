@@ -31,6 +31,7 @@ export function settingsPage(
     unreadableSecrets?: string[];
     xRoute?: { route: string; cookieConfigured: boolean; at: string };
     lastReport?: { at: string; day: string; error: string };
+    aiSentiment?: { status?: { at: string; scored: number; changed: number; model: string; error?: string }; pending: number };
   } = {},
 ): string {
   const report = extra.lastReport;
@@ -140,6 +141,11 @@ export function settingsPage(
           <label class="heroui-label">Tên Model
             <input class="heroui-input" type="text" name="LLM_MODEL" value="${escapeHtml(config.LLM_MODEL)}" placeholder="gpt-4o-mini hoặc claude-3-5-sonnet-20241022" />
           </label>
+          <label class="check-label">
+            <input type="checkbox" name="AI_SENTIMENT" value="1"${config.AI_SENTIMENT !== "0" ? " checked" : ""} />
+            Dùng AI chấm cảm xúc bài mới sau mỗi lượt quét (hiểu mỉa mai, phủ định tốt hơn đếm từ)
+          </label>
+          ${aiSentimentStatus(config, extra.aiSentiment)}
         </div>
 
         <div class="settings-card heroui-card">
@@ -195,4 +201,22 @@ export function settingsPage(
     `,
     "settings",
   );
+}
+
+function aiSentimentStatus(
+  config: AppConfig,
+  info: { status?: { at: string; scored: number; changed: number; model: string; error?: string }; pending: number } | undefined,
+): string {
+  if (!config.LLM_API_KEY.trim() || config.AI_SENTIMENT === "0") return "";
+  const st = info?.status;
+  const line = st
+    ? st.error
+      ? `<p class="hint" style="color:var(--heroui-danger);">Lần chấm lúc ${escapeHtml(formatWhen(st.at))} lỗi: ${escapeHtml(st.error)}</p>`
+      : `<p class="hint" style="color:var(--heroui-success);">${uiIcon("check", 12)} Lần chấm lúc ${escapeHtml(formatWhen(st.at))}: ${st.scored} bài, sửa nhãn ${st.changed} bài (${escapeHtml(st.model)}).</p>`
+    : "";
+  const pending = info?.pending ?? 0;
+  const button = pending > 0
+    ? `<button class="btn btn-sm btn-outline" type="submit" formaction="/sentiment/ai-run" formmethod="post">${uiIcon("zap", 12)} Chấm ngay ${pending} bài 7 ngày qua</button>`
+    : `<p class="hint">Mọi bài trong 7 ngày qua đã được AI hoặc người chấm.</p>`;
+  return `${line}${button}`;
 }
